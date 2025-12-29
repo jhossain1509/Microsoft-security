@@ -90,6 +90,7 @@ class GoldenITEntraGUI:
         self.status_q = Queue()
         self.pause_flag = threading.Event()
         self.stop_flag = threading.Event()
+        self.files_updated = False
         self.failed_emails = []
         self.log_rows = []
         self.summary = {"Total": 0, "Processed": 0, "Success": 0, "Fail": 0, "Skipped": 0}
@@ -116,6 +117,9 @@ class GoldenITEntraGUI:
         ctk.CTkButton(top, text="Start", command=self.start, fg_color="#3e9b48", hover_color="#2ca02c", width=90).place(x=600, y=25)
         ctk.CTkButton(top, text="Pause", command=self.pause, fg_color="#eed202", hover_color="#ffea00", width=90, text_color="#1d2127").place(x=600, y=65)
         ctk.CTkButton(top, text="Resume", command=self.resume, fg_color="#339af0", hover_color="#1e70bf", width=90).place(x=700, y=65)
+        self.update_resume_btn = ctk.CTkButton(top, text="Update & Resume", command=self.update_and_resume, fg_color="#9b59b6", hover_color="#8e44ad", width=130)
+        self.update_resume_btn.place(x=795, y=65)
+        self.update_resume_btn.place_forget()  # Hidden by default
         ctk.CTkButton(top, text="Stop", command=self.stop, fg_color="#e94949", hover_color="#c0392b", width=90).place(x=700, y=25)
         ctk.CTkButton(top, text="Retry Failed", command=self.retry_failed, fg_color="#d99c29", hover_color="#b78314", width=115).place(x=810, y=25)
         ctk.CTkButton(top, text="Export Logs", command=self.export_logs, fg_color="#8f67c7", hover_color="#6c47a8", width=115).place(x=810, y=65)
@@ -225,10 +229,49 @@ class GoldenITEntraGUI:
     def pause(self):
         self.pause_flag.set()
         self.status_q.put({"msg": "Paused by user.", "lvl": "WARN"})
+        # Show "Update & Resume" button when paused
+        self.root.after(100, lambda: self.update_resume_btn.place(x=795, y=65))
 
     def resume(self):
         self.pause_flag.clear()
+        self.files_updated = False
         self.status_q.put({"msg": "Resumed.", "lvl": "INFO"})
+        # Hide "Update & Resume" button
+        self.root.after(100, lambda: self.update_resume_btn.place_forget())
+
+    def update_and_resume(self):
+        """Reload files and resume processing"""
+        try:
+            # Reload accounts
+            accs = []
+            with open(self.acc_path.get(), newline="", encoding="utf-8") as f:
+                r = csv.DictReader(f) if self.acc_path.get().endswith(".csv") else (dict(zip(["email", "password", "secret"], l.strip().split(",", 2))) for l in f if l.strip())
+                for row in r:
+                    e = row.get("email") or row.get("username") or row.get("upn")
+                    p = row.get("password") or row.get("pass")
+                    s = row.get("2fa_secret") or row.get("secret", "")
+                    if e and p:
+                        accs.append(Account(email=e.strip(), password=p.strip(), secret=s.strip()))
+            
+            # Reload emails
+            with open(self.eml_path.get(), encoding="utf-8") as f:
+                eml = [l.strip() for l in f if "@" in l]
+            
+            if not accs or not eml:
+                messagebox.showerror("Error", "Accounts or Emails file is empty after reload.")
+                return
+            
+            self.accounts = accs
+            self.emails = eml
+            self.summary['Total'] = len(accs)
+            self.update_summary()
+            
+            self.files_updated = True
+            self.pause_flag.clear()
+            self.status_q.put({"msg": f"Files reloaded: {len(accs)} accounts, {len(eml)} emails. Resuming...", "lvl": "INFO"})
+            self.update_resume_btn.place_forget()
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to reload files: {e}")
 
     def stop(self):
         self.stop_flag.set()
@@ -273,23 +316,61 @@ class GoldenITEntraGUI:
         self.async_loop = asyncio.get_running_loop()
         batch = self.batch_size.get()
         sem = asyncio.Semaphore(batch)
-        tasks = []
-        for idx, acc in enumerate(self.accounts):
-            await sem.acquire()
-            if self.stop_flag.is_set(): break
-            t = asyncio.create_task(self.worker(acc, idx, sem))
-            tasks.append(t)
-        await asyncio.gather(*tasks)
-        self.status_q.put({"msg": "All accounts processed.", "lvl": "SUCCESS"})
+        
+        # Track which emails have been processed
+        processed_emails = set()
+        email_queue = self.emails.copy()
+        account_cycle = 0
+        
+        while email_queue:
+            if self.stop_flag.is_set():
+                break
+            
+            self.status_q.put({"msg": f"Account cycle {account_cycle + 1} started. Remaining emails: {len(email_queue)}", "lvl": "INFO"})
+            
+            tasks = []
+            for idx, acc in enumerate(self.accounts):
+                if self.stop_flag.is_set():
+                    break
+                
+                # Check if there are still emails to process
+                if not email_queue:
+                    break
+                
+                # Assign emails to this account
+                emails_per_acc = self.per_account.get()
+                my_emails = email_queue[:emails_per_acc]
+                email_queue = email_queue[emails_per_acc:]
+                
+                if not my_emails:
+                    continue
+                
+                await sem.acquire()
+                if self.stop_flag.is_set():
+                    sem.release()
+                    break
+                
+                t = asyncio.create_task(self.worker(acc, idx, sem, my_emails, processed_emails))
+                tasks.append(t)
+            
+            await asyncio.gather(*tasks)
+            account_cycle += 1
+            
+            # If there are still emails left, loop accounts again
+            if email_queue and not self.stop_flag.is_set():
+                self.status_q.put({"msg": f"Cycling accounts again. {len(email_queue)} emails remaining.", "lvl": "INFO"})
+                await asyncio.sleep(2)
+        
+        self.status_q.put({"msg": "All emails processed.", "lvl": "SUCCESS"})
         self.job_done()
 
-    async def worker(self, acc: Account, idx: int, sem):
+    async def worker(self, acc: Account, idx: int, sem, my_emails, processed_emails):
         try:
-            await self._worker(acc, idx)
+            await self._worker(acc, idx, my_emails, processed_emails)
         finally:
             sem.release()
 
-    async def _worker(self, acc: Account, idx: int):
+    async def _worker(self, acc: Account, idx: int, my_emails, processed_emails):
         async with async_playwright() as p:
             browser = await p.chromium.launch(headless=False, args=[
                 f"--window-size={520},{640}",
@@ -332,19 +413,25 @@ class GoldenITEntraGUI:
                     except Exception:
                         await asyncio.sleep(3)
                 await asyncio.sleep(3)
-                emails_per_acc = self.per_account.get()
-                start_idx = idx * emails_per_acc
-                end_idx = start_idx + emails_per_acc
-                my_emails = self.emails[start_idx:end_idx]
+                
                 if not my_emails:
                     self.status_q.put({"msg": f"{acc.email}: No emails assigned.", "lvl": "WARN"})
                     await browser.close()
                     return
+                    
                 await wait_and_click(page, 'button:has-text("Add sign-in method"), [data-testid="add-method-button"]', max_wait=30)
                 await wait_and_click(page, 'div[data-testid="authmethod-picker-email"]', max_wait=30)
                 await wait_and_click(page, 'button:has-text("Add")', max_wait=10)
                 await asyncio.sleep(1)
+                
                 for i, email in enumerate(my_emails):
+                    # Check for pause
+                    while self.pause_flag.is_set() and not self.stop_flag.is_set():
+                        await asyncio.sleep(1)
+                    
+                    if self.stop_flag.is_set():
+                        break
+                    
                     try:
                         emailbox = await wait_for_visible(page, 'input[data-testid="email-input"], input[type="text"][placeholder="Email"]', max_wait=10)
                         if not emailbox:
@@ -358,7 +445,8 @@ class GoldenITEntraGUI:
                         await asyncio.sleep(1.7)
                         await wait_and_click(page, 'span:has-text("Back")', max_wait=10)
                         await asyncio.sleep(1.2)
-                        # পরের ইমেইলের জন্য UI ready check, নইলে আবার Add sign-in method
+                        
+                        # Check if next email needs UI reset
                         if i < len(my_emails) - 1:
                             emailbox = await wait_for_visible(page, 'input[data-testid="email-input"], input[type="text"][placeholder="Email"]', max_wait=10)
                             if not emailbox:
@@ -366,7 +454,9 @@ class GoldenITEntraGUI:
                                 await wait_and_click(page, 'div[data-testid="authmethod-picker-email"]', max_wait=15)
                                 await wait_and_click(page, 'button:has-text("Add")', max_wait=10)
                                 await asyncio.sleep(1)
-                        # Success log, sent done & remove from .txt
+                        
+                        # Success - mark as processed
+                        processed_emails.add(email)
                         row = [acc.email, email, "Success", "", datetime.datetime.now().isoformat()]
                         self.status_q.put({
                             "msg": f"{acc.email}: Added {email}",
