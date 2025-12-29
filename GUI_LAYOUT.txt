@@ -1,0 +1,102 @@
+Screenshot Monitor (SMTP) - GUI Layout
+========================================
+
+┌─────────────────────────────────────────────────────────────┐
+│                  Screenshot Monitor (SMTP)                  │
+│                                                             │
+│  ┌───────────────────────────────────────────────────────┐ │
+│  │ SMTP Configuration                                    │ │
+│  │                                                       │ │
+│  │  SMTP Host:     [smtp.gmail.com                    ] │ │
+│  │  SMTP Port:     [587                               ] │ │
+│  │  Username:      [your.email@gmail.com              ] │ │
+│  │  Password:      [••••••••••••••••••                ] │ │
+│  └───────────────────────────────────────────────────────┘ │
+│                                                             │
+│  ┌───────────────────────────────────────────────────────┐ │
+│  │ Email Configuration                                   │ │
+│  │                                                       │ │
+│  │  Send To:       [recipient@example.com             ] │ │
+│  │  Interval (min):[5                                 ] │ │
+│  └───────────────────────────────────────────────────────┘ │
+│                                                             │
+│  ┌───────────────────────────────────────────────────────┐ │
+│  │ Status                                                │ │
+│  │                                                       │ │
+│  │  Status: Running                                      │ │
+│  │  Last Capture: 2025-12-29 09:30:45 (Success)         │ │
+│  └───────────────────────────────────────────────────────┘ │
+│                                                             │
+│     [Start Monitoring]  [Stop Monitoring]  [Save Config]   │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+
+Features:
+---------
+1. SMTP Configuration Section:
+   - SMTP Host: Email server address (e.g., smtp.gmail.com)
+   - SMTP Port: Server port (usually 587 for TLS)
+   - Username: Your email address
+   - Password: Masked password field (shows ••••)
+
+2. Email Configuration Section:
+   - Send To: Recipient email address
+   - Interval: Minutes between screenshots (e.g., 5, 10, 15)
+
+3. Status Section:
+   - Real-time monitoring status (Running/Stopped)
+   - Last capture timestamp and result (Success/Failed)
+
+4. Control Buttons:
+   - Start Monitoring: Begin capturing and sending screenshots
+   - Stop Monitoring: Stop the monitoring process
+   - Save Config: Persist settings to disk
+
+Behavior:
+---------
+- When monitoring is STOPPED:
+  ✓ All fields are editable
+  ✓ Start button is enabled
+  ✓ Stop button is disabled
+  ✓ Status shows "Stopped" in red
+
+- When monitoring is RUNNING:
+  ✓ All fields are disabled (locked)
+  ✓ Start button is disabled
+  ✓ Stop button is enabled
+  ✓ Status shows "Running" in green
+  ✓ Last capture updates after each screenshot
+
+Configuration Persistence:
+--------------------------
+- Settings are saved to: ~/.screenshot_monitor_config.json
+- Automatically loaded when application starts
+- Click "Save Config" to persist current settings
+
+Background Operation:
+--------------------
+- Runs in a separate background thread
+- Does not block the GUI
+- Continues capturing at the specified interval
+- Each screenshot is:
+  1. Captured (full desktop)
+  2. Sent via email with system info
+  3. Deleted from disk
+  4. Status updated in GUI
+
+Email Content:
+--------------
+Subject: Screenshot from {HOSTNAME} ({LOCAL_IP})
+
+Body:
+  Screenshot Monitor Report
+  
+  Hostname: DESKTOP-ABC123
+  Local IP: 192.168.1.100
+  Platform: Windows 10
+  Timestamp: 2025-12-29 09:30:45
+  
+  This is an automated screenshot capture from 
+  the Screenshot Monitor application.
+
+Attachment: screenshot_20251229_093045.png (full desktop)

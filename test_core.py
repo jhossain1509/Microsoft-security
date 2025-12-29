@@ -15,7 +15,7 @@ def test_get_hostname_and_ip():
     hostname = socket.gethostname()
     try:
         local_ip = socket.gethostbyname(hostname)
-    except:
+    except (socket.gaierror, OSError):
         local_ip = "Unknown"
     
     print(f"✓ Hostname: {hostname}")
@@ -50,7 +50,6 @@ def test_imports():
     print("\nTesting standard library imports...")
     modules = [
         'threading',
-        'time',
         'smtplib',
         'socket',
         'json',
@@ -58,7 +57,6 @@ def test_imports():
         'email.mime.multipart',
         'email.mime.text',
         'email.mime.base',
-        'email',
         'datetime',
         'pathlib',
         'platform'

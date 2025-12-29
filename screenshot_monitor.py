@@ -7,7 +7,6 @@ Captures full desktop screenshots and sends them via email at configurable inter
 import tkinter as tk
 from tkinter import ttk, messagebox
 import threading
-import time
 import smtplib
 import socket
 import json
@@ -132,7 +131,7 @@ class ScreenshotMonitor:
         try:
             # Get local IP address
             local_ip = socket.gethostbyname(hostname)
-        except:
+        except (socket.gaierror, OSError):
             local_ip = "Unknown"
         return hostname, local_ip
     
@@ -223,19 +222,19 @@ This is an automated screenshot capture from the Screenshot Monitor application.
                 # Clean up screenshot file
                 try:
                     os.remove(screenshot_path)
-                except:
+                except (OSError, FileNotFoundError):
                     pass
                 
                 # Update last capture time
                 timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 status = "Success" if success else "Failed"
-                self.root.after(0, lambda: self.last_capture_label.config(
-                    text=f"Last Capture: {timestamp} ({status})"))
+                self.root.after(0, lambda t=timestamp, s=status: self.last_capture_label.config(
+                    text=f"Last Capture: {t} ({s})"))
                 
             except Exception as e:
                 print(f"Error in monitoring loop: {e}")
-                self.root.after(0, lambda: self.last_capture_label.config(
-                    text=f"Last Capture: Error - {str(e)[:50]}"))
+                self.root.after(0, lambda ex=e: self.last_capture_label.config(
+                    text=f"Last Capture: Error - {str(ex)[:50]}"))
             
             # Wait for the interval or stop event
             self.stop_event.wait(interval_seconds)
