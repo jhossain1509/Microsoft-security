@@ -16,8 +16,8 @@ class AuthMiddleware {
      * Verify JWT token and return decoded payload
      */
     public static function verifyToken() {
-        $headers = getallheaders();
-        $authHeader = $headers['Authorization'] ?? $headers['authorization'] ?? '';
+        $headers = array_change_key_case(getallheaders(), CASE_LOWER);
+        $authHeader = $headers['authorization'] ?? '';
         
         if (empty($authHeader)) {
             errorResponse('Authorization header missing', 401);

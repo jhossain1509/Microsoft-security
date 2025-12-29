@@ -143,7 +143,9 @@ CREATE TABLE IF NOT EXISTS settings (
   INDEX idx_setting_key (setting_key)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Insert default admin user (password: admin123 - CHANGE THIS!)
+-- Insert default admin user
+-- ⚠️ CRITICAL SECURITY: Change this password immediately after installation!
+-- Password: admin123 (MUST BE CHANGED)
 -- Password hash for 'admin123' using bcrypt
 INSERT INTO users (id, email, password_hash, role, is_active) 
 VALUES (

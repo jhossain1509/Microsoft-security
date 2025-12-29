@@ -24,7 +24,10 @@ define('DB_PASS', getenv('DB_PASS') ?: '');
 define('DB_CHARSET', 'utf8mb4');
 
 // JWT Configuration
-define('JWT_SECRET', getenv('JWT_SECRET') ?: 'CHANGE_THIS_TO_A_VERY_STRONG_SECRET_KEY_MIN_32_CHARS');
+define('JWT_SECRET', getenv('JWT_SECRET') ?: '');
+if (empty(JWT_SECRET)) {
+    die("CRITICAL: JWT_SECRET not configured. Set JWT_SECRET environment variable or edit config.php");
+}
 define('JWT_ALGORITHM', 'HS256');
 define('JWT_ACCESS_EXPIRY', 900); // 15 minutes
 define('JWT_REFRESH_EXPIRY', 2592000); // 30 days
@@ -32,8 +35,17 @@ define('JWT_REFRESH_EXPIRY', 2592000); // 30 days
 // Application Configuration
 define('APP_NAME', 'GoldenIT Entra');
 define('APP_VERSION', '1.0.0');
-define('APP_URL', getenv('APP_URL') ?: 'https://gittoken.store/Microsoft-Entra');
-define('API_URL', APP_URL . '/api');
+define('APP_URL', getenv('APP_URL') ?: '');
+if (empty(APP_URL)) {
+    // Auto-detect from request
+    $protocol = isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on' ? 'https' : 'http';
+    $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
+    $path = dirname($_SERVER['SCRIPT_NAME'] ?? '');
+    define('APP_URL_AUTO', "$protocol://$host$path");
+} else {
+    define('APP_URL_AUTO', APP_URL);
+}
+define('API_URL', rtrim(APP_URL_AUTO, '/') . '/api');
 
 // File Upload Configuration
 define('UPLOAD_DIR', __DIR__ . '/uploads');
