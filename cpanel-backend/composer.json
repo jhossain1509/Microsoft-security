@@ -1,0 +1,13 @@
+{
+    "name": "goldenit/entra-backend",
+    "description": "GoldenIT Microsoft Entra Backend API",
+    "require": {
+        "php": ">=7.4",
+        "firebase/php-jwt": "^6.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "GoldenIT\\": "src/"
+        }
+    }
+}

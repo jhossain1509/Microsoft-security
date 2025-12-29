@@ -1,0 +1,64 @@
+# GoldenIT Microsoft Entra - Apache Configuration
+
+# Enable Rewrite Engine
+RewriteEngine On
+RewriteBase /Microsoft-Entra/
+
+# Security Headers
+<IfModule mod_headers.c>
+    Header set X-Content-Type-Options "nosniff"
+    Header set X-Frame-Options "SAMEORIGIN"
+    Header set X-XSS-Protection "1; mode=block"
+    Header set Referrer-Policy "strict-origin-when-cross-origin"
+    
+    # Remove server signature
+    Header unset Server
+    Header unset X-Powered-By
+</IfModule>
+
+# Disable directory listing
+Options -Indexes
+
+# Protect sensitive files
+<FilesMatch "(^\.htaccess|\.env|config\.php|composer\.(json|lock))$">
+    Require all denied
+</FilesMatch>
+
+# PHP Security Settings
+<IfModule mod_php7.c>
+    php_flag display_errors Off
+    php_flag display_startup_errors Off
+    php_value error_reporting 0
+    php_value max_execution_time 300
+    php_value upload_max_filesize 10M
+    php_value post_max_size 10M
+</IfModule>
+
+# Compression
+<IfModule mod_deflate.c>
+    AddOutputFilterByType DEFLATE text/html text/plain text/xml text/css text/javascript application/javascript application/json
+</IfModule>
+
+# Browser Caching
+<IfModule mod_expires.c>
+    ExpiresActive On
+    ExpiresByType image/jpg "access plus 1 year"
+    ExpiresByType image/jpeg "access plus 1 year"
+    ExpiresByType image/gif "access plus 1 year"
+    ExpiresByType image/png "access plus 1 year"
+    ExpiresByType text/css "access plus 1 month"
+    ExpiresByType application/javascript "access plus 1 month"
+</IfModule>
+
+# CORS - handled in PHP config.php
+
+# Error Pages (optional - uncomment if you have custom error pages)
+# ErrorDocument 404 /Microsoft-Entra/404.html
+# ErrorDocument 500 /Microsoft-Entra/500.html
+
+# Protect uploads directory from PHP execution
+<Directory "uploads">
+    <FilesMatch "\.php$">
+        Require all denied
+    </FilesMatch>
+</Directory>
