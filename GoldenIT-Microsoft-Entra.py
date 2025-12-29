@@ -65,6 +65,17 @@ def remove_email_from_txt(email, email_txt):
     except Exception as e:
         print(f"Failed to remove {email} from {email_txt}: {e}")
 
+def load_sent_done_set():
+    s = set()
+    if os.path.exists("sent_done.txt"):
+        try:
+            with open("sent_done.txt", encoding="utf-8") as f:
+                for l in f:
+                    if l.strip():
+                        s.add(l.strip().lower())
+        except: pass
+    return s
+
 @dataclass
 class Account:
     email: str
@@ -80,7 +91,7 @@ class GoldenITEntraGUI:
         ctk.set_default_color_theme("blue")
         self.root = ctk.CTk()
         self.root.title("GoldenIT Entra Batch Email Method Adder")
-        self.root.geometry("970x710")
+        self.root.geometry("970x740")
         self.root.resizable(False, False)
         self.accounts = []
         self.emails = []
@@ -93,6 +104,11 @@ class GoldenITEntraGUI:
         self.failed_emails = []
         self.log_rows = []
         self.summary = {"Total": 0, "Processed": 0, "Success": 0, "Fail": 0, "Skipped": 0}
+
+        # async locks (set in runner/main_batch)
+        self.emails_lock = None
+        self.account_lock = None
+        self.account_index = 0
 
         # ----------- UI Layout -----------
         top = ctk.CTkFrame(self.root, width=930, height=170)
@@ -119,6 +135,8 @@ class GoldenITEntraGUI:
         ctk.CTkButton(top, text="Stop", command=self.stop, fg_color="#e94949", hover_color="#c0392b", width=90).place(x=700, y=25)
         ctk.CTkButton(top, text="Retry Failed", command=self.retry_failed, fg_color="#d99c29", hover_color="#b78314", width=115).place(x=810, y=25)
         ctk.CTkButton(top, text="Export Logs", command=self.export_logs, fg_color="#8f67c7", hover_color="#6c47a8", width=115).place(x=810, y=65)
+        # Update & Resume button for after Pause & external file edits
+        ctk.CTkButton(top, text="Update & Resume", command=self.update_and_resume, fg_color="#2d9cdb", hover_color="#1b82c2", width=140).place(x=600, y=105)
 
         self.pbar = ctk.CTkProgressBar(self.root, width=780, height=16, corner_radius=8)
         self.pbar.place(x=80, y=200)
@@ -237,6 +255,48 @@ class GoldenITEntraGUI:
             try: asyncio.run_coroutine_threadsafe(b.close(), self.async_loop)
             except: pass
 
+    # Update & Resume: reload account/email files (use after Pause)
+    def update_and_resume(self):
+        if not self.pause_flag.is_set():
+            messagebox.showinfo("Update & Resume", "Please Pause the run first, then update files externally and click Update & Resume.")
+            return
+        # reload accounts
+        try:
+            accs = []
+            if self.acc_path.get() and os.path.exists(self.acc_path.get()):
+                with open(self.acc_path.get(), newline="", encoding="utf-8") as f:
+                    r = csv.DictReader(f) if self.acc_path.get().endswith(".csv") else (dict(zip(["email", "password", "secret"], l.strip().split(",", 2))) for l in f if l.strip())
+                    for row in r:
+                        e = row.get("email") or row.get("username") or row.get("upn")
+                        p = row.get("password") or row.get("pass")
+                        s = row.get("2fa_secret") or row.get("secret", "")
+                        if e and p:
+                            accs.append(Account(email=e.strip(), password=p.strip(), secret=s.strip()))
+            if accs:
+                # keep new accounts; worker tasks will pick from updated self.accounts (workers use shared account_index)
+                self.accounts = accs
+                self.summary['Total'] = len(accs)
+                self.status_q.put({"msg": f"Accounts reloaded: {len(accs)}", "lvl": "INFO", "summary": {"Total": len(accs)}})
+            # reload emails, excluding already sent ones
+            sent_done = load_sent_done_set()
+            if self.eml_path.get() and os.path.exists(self.eml_path.get()):
+                with open(self.eml_path.get(), encoding="utf-8") as f:
+                    eml = [l.strip() for l in f if "@" in l]
+                # Filter out already sent
+                new_emails = [e for e in eml if e.strip().lower() not in sent_done and e.strip() not in self.failed_emails]
+                # insert these at front of queue so they get processed next
+                # we will replace the current queue with new_emails + existing (unprocessed)
+                # current self.emails may have remaining ones from before pause; we prefer to use updated file so replace
+                self.emails = new_emails
+                self.status_q.put({"msg": f"Emails reloaded: {len(new_emails)}", "lvl": "INFO"})
+            else:
+                self.status_q.put({"msg": "Emails file not found on reload.", "lvl": "WARN"})
+        except Exception as e:
+            self.status_q.put({"msg": f"Reload failed: {e}", "lvl": "ERROR"})
+        # resume
+        self.pause_flag.clear()
+        self.status_q.put({"msg": "Update complete. Resumed.", "lvl": "SUCCESS"})
+
     # ------ Main Start ------
     def start(self):
         if not self.acc_path.get() or not self.eml_path.get():
@@ -253,8 +313,11 @@ class GoldenITEntraGUI:
                     accs.append(Account(email=e.strip(), password=p.strip(), secret=s.strip()))
         with open(self.eml_path.get(), encoding="utf-8") as f:
             eml = [l.strip() for l in f if "@" in l]
+        # filter out already sent (sent_done.txt)
+        sent_done = load_sent_done_set()
+        eml = [e for e in eml if e.strip().lower() not in sent_done]
         if not accs or not eml:
-            messagebox.showerror("Error", "Accounts or Emails file is empty or invalid.")
+            messagebox.showerror("Error", "Accounts or Emails file is empty or invalid (or all emails already sent).")
             return
         self.accounts = accs
         self.emails = eml
@@ -271,120 +334,143 @@ class GoldenITEntraGUI:
 
     async def main_batch(self):
         self.async_loop = asyncio.get_running_loop()
-        batch = self.batch_size.get()
-        sem = asyncio.Semaphore(batch)
+        batch = max(1, self.batch_size.get())
+        # async locks for coordinated access to shared queues & account rotation
+        self.emails_lock = asyncio.Lock()
+        self.account_lock = asyncio.Lock()
+        self.account_index = 0
         tasks = []
-        for idx, acc in enumerate(self.accounts):
-            await sem.acquire()
-            if self.stop_flag.is_set(): break
-            t = asyncio.create_task(self.worker(acc, idx, sem))
+        # create worker tasks (workers choose an account each time in round-robin)
+        for wid in range(batch):
+            t = asyncio.create_task(self.generic_worker(wid))
             tasks.append(t)
         await asyncio.gather(*tasks)
         self.status_q.put({"msg": "All accounts processed.", "lvl": "SUCCESS"})
         self.job_done()
 
-    async def worker(self, acc: Account, idx: int, sem):
+    async def generic_worker(self, worker_id: int):
+        # Each worker opens its own browser and repeatedly takes next account & next batch of emails
         try:
-            await self._worker(acc, idx)
-        finally:
-            sem.release()
-
-    async def _worker(self, acc: Account, idx: int):
-        async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=False, args=[
-                f"--window-size={520},{640}",
-                f"--window-position={40 + (idx%5)*520},{80 + (idx//5)*640}",
-            ])
-            self.browser_refs.append(browser)
-            ctx = await browser.new_context(viewport={"width": 520, "height": 640})
-            page = await ctx.new_page()
-            try:
-                self.status_q.put({"msg": f"({idx+1}) {acc.email} Logging in…", "lvl": "INFO"})
-                await page.goto("https://entra.microsoft.com/", timeout=600000)
-                await page.fill("input[name='loginfmt'],input[type='email']", acc.email)
-                await page.click("#idSIButton9,button[type='submit'],input[type='submit']")
-                await page.wait_for_selector("input[name='passwd'],input[type='password']", timeout=350000)
-                await page.fill("input[name='passwd'],input[type='password']", acc.password)
-                await page.click("#idSIButton9,button[type='submit'],input[type='submit']", timeout=350000)
-                await asyncio.sleep(3)
-                try:
-                    if await page.is_visible("#idSIButton9"):
-                        await page.click("#idSIButton9")
-                    else:
-                        yes_span = await page.query_selector('span:has-text("Yes")')
-                        if yes_span:
-                            await yes_span.evaluate('node => node.parentElement.click()')
-                except Exception: pass
-                try:
-                    el = await wait_for_visible(page, 'input[type="tel"],input[name*="code"],input[autocomplete="one-time-code"]', max_wait=15)
-                    if el and acc.secret:
-                        code = totp(acc.secret)
-                        await el.fill(code)
-                        await wait_and_click(page, "button[type='submit'],input[type='submit']", max_wait=10)
-                        self.status_q.put({"msg": f"[2FA] {acc.email} TOTP: {code}", "lvl": "SUCCESS"})
-                        await asyncio.sleep(2.5)
-                except Exception: pass
-                for nav_try in range(3):
+            async with async_playwright() as p:
+                browser = await p.chromium.launch(headless=False, args=[
+                    f"--window-size={520},{640}",
+                    f"--window-position={40 + (worker_id%5)*520},{80 + (worker_id//5)*640}",
+                ])
+                self.browser_refs.append(browser)
+                ctx = await browser.new_context(viewport={"width": 520, "height": 640})
+                page = await ctx.new_page()
+                while True:
+                    if self.stop_flag.is_set():
+                        break
+                    # pause handling
+                    while self.pause_flag.is_set():
+                        await asyncio.sleep(0.5)
+                        if self.stop_flag.is_set():
+                            break
+                    if self.stop_flag.is_set():
+                        break
+                    # pick an account (round-robin, reflects updates to self.accounts)
+                    async with self.account_lock:
+                        if not self.accounts:
+                            await asyncio.sleep(1)
+                            continue
+                        acc = self.accounts[self.account_index % len(self.accounts)]
+                        self.account_index = (self.account_index + 1) % len(self.accounts)
+                    # pick next batch of emails (atomic)
+                    async with self.emails_lock:
+                        my_emails = []
+                        for _ in range(self.per_account.get()):
+                            if self.emails:
+                                my_emails.append(self.emails.pop(0))
+                            else:
+                                break
+                    if not my_emails:
+                        break
+                    # process batch for this acc
                     try:
-                        await page.goto("https://mysignins.microsoft.com/security-info", timeout=20000)
-                        await asyncio.sleep(2)
-                        if "security-info" in page.url: break
-                    except Exception:
-                        await asyncio.sleep(3)
-                await asyncio.sleep(3)
-                emails_per_acc = self.per_account.get()
-                start_idx = idx * emails_per_acc
-                end_idx = start_idx + emails_per_acc
-                my_emails = self.emails[start_idx:end_idx]
-                if not my_emails:
-                    self.status_q.put({"msg": f"{acc.email}: No emails assigned.", "lvl": "WARN"})
+                        await self.process_account_batch(page, acc, my_emails, worker_id)
+                    except Exception as e:
+                        self.status_q.put({
+                            "msg": f"{acc.email} BATCH FAILED: {e}",
+                            "lvl": "ERROR",
+                            "logrow": [acc.email, "", "Fail", str(e), datetime.datetime.now().isoformat()],
+                            "failacc": acc.email,
+                            "summary": {
+                                "Processed": self.summary["Processed"]+len(my_emails),
+                                "Fail": self.summary["Fail"]+len(my_emails)
+                            }
+                        })
+                try:
                     await browser.close()
-                    return
+                except: pass
+        except Exception as e:
+            self.status_q.put({"msg": f"Worker {worker_id} fatal: {e}", "lvl": "ERROR"})
+
+    async def process_account_batch(self, page, acc: Account, my_emails, worker_id):
+        # This function performs login and then attempts to add the provided my_emails for the given account using the provided page.
+        try:
+            self.status_q.put({"msg": f"[W{worker_id}] {acc.email} Logging in…", "lvl": "INFO"})
+            await page.goto("https://entra.microsoft.com/", timeout=600000)
+            await page.fill("input[name='loginfmt'],input[type='email']", acc.email)
+            await page.click("#idSIButton9,button[type='submit'],input[type='submit']")
+            await page.wait_for_selector("input[name='passwd'],input[type='password']", timeout=350000)
+            await page.fill("input[name='passwd'],input[type='password']", acc.password)
+            await page.click("#idSIButton9,button[type='submit'],input[type='submit']", timeout=350000)
+            await asyncio.sleep(3)
+            try:
+                if await page.is_visible("#idSIButton9"):
+                    await page.click("#idSIButton9")
+                else:
+                    yes_span = await page.query_selector('span:has-text("Yes")')
+                    if yes_span:
+                        await yes_span.evaluate('node => node.parentElement.click()')
+            except Exception: pass
+            try:
+                el = await wait_for_visible(page, 'input[type="tel"],input[name*="code"],input[autocomplete="one-time-code"]', max_wait=15)
+                if el and acc.secret:
+                    code = totp(acc.secret)
+                    await el.fill(code)
+                    await wait_and_click(page, "button[type='submit'],input[type='submit']", max_wait=10)
+                    self.status_q.put({"msg": f"[2FA] {acc.email} TOTP: {code}", "lvl": "SUCCESS"})
+                    await asyncio.sleep(2.5)
+            except Exception: pass
+            # navigate to security-info
+            for nav_try in range(3):
+                try:
+                    await page.goto("https://mysignins.microsoft.com/security-info", timeout=20000)
+                    await asyncio.sleep(2)
+                    if "security-info" in page.url: break
+                except Exception:
+                    await asyncio.sleep(3)
+            await asyncio.sleep(2)
+            # open Add sign-in method once before per-email loop
+            try:
                 await wait_and_click(page, 'button:has-text("Add sign-in method"), [data-testid="add-method-button"]', max_wait=30)
                 await wait_and_click(page, 'div[data-testid="authmethod-picker-email"]', max_wait=30)
                 await wait_and_click(page, 'button:has-text("Add")', max_wait=10)
                 await asyncio.sleep(1)
-                for i, email in enumerate(my_emails):
-                    try:
+            except Exception as e:
+                # continue because some UIs may differ; we'll try per-email
+                pass
+
+            for i, email in enumerate(my_emails):
+                if self.stop_flag.is_set() or self.pause_flag.is_set():
+                    break
+                try:
+                    emailbox = await wait_for_visible(page, 'input[data-testid="email-input"], input[type="text"][placeholder="Email"]', max_wait=10)
+                    if not emailbox:
+                        # try opening add method flow again
+                        await wait_and_click(page, 'button:has-text("Add sign-in method"), [data-testid="add-method-button"]', max_wait=15)
+                        await wait_and_click(page, 'div[data-testid="authmethod-picker-email"]', max_wait=15)
+                        await wait_and_click(page, 'button:has-text("Add")', max_wait=10)
+                        await asyncio.sleep(1)
                         emailbox = await wait_for_visible(page, 'input[data-testid="email-input"], input[type="text"][placeholder="Email"]', max_wait=10)
-                        if not emailbox:
-                            self.status_q.put({"msg": f"{acc.email}: Email input not found.", "lvl": "ERROR", "failacc": acc.email})
-                            break
-                        await emailbox.fill("")
-                        await asyncio.sleep(0.2)
-                        await emailbox.fill(email)
-                        await asyncio.sleep(0.2)
-                        await wait_and_click(page, 'span:has-text("Next")', max_wait=10)
-                        await asyncio.sleep(1.7)
-                        await wait_and_click(page, 'span:has-text("Back")', max_wait=10)
-                        await asyncio.sleep(1.2)
-                        # পরের ইমেইলের জন্য UI ready check, নইলে আবার Add sign-in method
-                        if i < len(my_emails) - 1:
-                            emailbox = await wait_for_visible(page, 'input[data-testid="email-input"], input[type="text"][placeholder="Email"]', max_wait=10)
-                            if not emailbox:
-                                await wait_and_click(page, 'button:has-text("Add sign-in method"), [data-testid="add-method-button"]', max_wait=15)
-                                await wait_and_click(page, 'div[data-testid="authmethod-picker-email"]', max_wait=15)
-                                await wait_and_click(page, 'button:has-text("Add")', max_wait=10)
-                                await asyncio.sleep(1)
-                        # Success log, sent done & remove from .txt
-                        row = [acc.email, email, "Success", "", datetime.datetime.now().isoformat()]
+                    if not emailbox:
+                        self.status_q.put({"msg": f"{acc.email}: Email input not found.", "lvl": "ERROR", "failacc": acc.email})
+                        # count as failed for this email
                         self.status_q.put({
-                            "msg": f"{acc.email}: Added {email}",
-                            "lvl": "SUCCESS",
-                            "logrow": row,
-                            "summary": {
-                                "Processed": self.summary["Processed"]+1,
-                                "Success": self.summary["Success"]+1
-                            }
-                        })
-                        save_sent_done(email)
-                        remove_email_from_txt(email, self.eml_path.get())
-                        print(f"Trying to remove {email}")
-                    except Exception as e:
-                        self.status_q.put({
-                            "msg": f"{acc.email}: Email add failed. {e}",
+                            "msg": f"{acc.email}: Email add failed for {email} (input missing).",
                             "lvl": "ERROR",
-                            "failacc": acc.email,
                             "faileml": email,
                             "summary": {
                                 "Processed": self.summary["Processed"]+1,
@@ -392,20 +478,60 @@ class GoldenITEntraGUI:
                             }
                         })
                         continue
-                await browser.close()
-            except Exception as e:
-                self.status_q.put({
-                    "msg": f"{acc.email} FAILED: {e}",
-                    "lvl": "ERROR",
-                    "logrow": [acc.email, "", "Fail", str(e), datetime.datetime.now().isoformat()],
-                    "failacc": acc.email,
-                    "summary": {
-                        "Processed": self.summary["Processed"]+1,
-                        "Fail": self.summary["Fail"]+1
-                    }
-                })
-                try: await browser.close()
-                except: pass
+                    await emailbox.fill("")
+                    await asyncio.sleep(0.2)
+                    await emailbox.fill(email)
+                    await asyncio.sleep(0.2)
+                    await wait_and_click(page, 'span:has-text("Next")', max_wait=10)
+                    await asyncio.sleep(1.7)
+                    # Some UIs show a Back or Done button
+                    try:
+                        await wait_and_click(page, 'span:has-text("Back")', max_wait=10)
+                    except:
+                        # ignore if not found
+                        pass
+                    await asyncio.sleep(1.2)
+                    # ensure ready for next
+                    if i < len(my_emails) - 1:
+                        emailbox = await wait_for_visible(page, 'input[data-testid="email-input"], input[type="text"][placeholder="Email"]', max_wait=10)
+                        if not emailbox:
+                            await wait_and_click(page, 'button:has-text("Add sign-in method"), [data-testid="add-method-button"]', max_wait=15)
+                            await wait_and_click(page, 'div[data-testid="authmethod-picker-email"]', max_wait=15)
+                            await wait_and_click(page, 'button:has-text("Add")', max_wait=10)
+                            await asyncio.sleep(1)
+                    # Success log, sent done & remove from .txt
+                    row = [acc.email, email, "Success", "", datetime.datetime.now().isoformat()]
+                    self.status_q.put({
+                        "msg": f"{acc.email}: Added {email}",
+                        "lvl": "SUCCESS",
+                        "logrow": row,
+                        "summary": {
+                            "Processed": self.summary["Processed"]+1,
+                            "Success": self.summary["Success"]+1
+                        }
+                    })
+                    save_sent_done(email)
+                    # try to remove email from original file (non-blocking)
+                    try:
+                        remove_email_from_txt(email, self.eml_path.get())
+                    except Exception as e:
+                        print(f"Trying to remove {email} failed: {e}")
+                except Exception as e:
+                    self.status_q.put({
+                        "msg": f"{acc.email}: Email add failed. {e}",
+                        "lvl": "ERROR",
+                        "failacc": acc.email,
+                        "faileml": email,
+                        "summary": {
+                            "Processed": self.summary["Processed"]+1,
+                            "Fail": self.summary["Fail"]+1
+                        }
+                    })
+                    continue
+            # small cooldown between batches
+            await asyncio.sleep(1.0)
+        except Exception as e:
+            raise
 
     def run(self):
         self.root.mainloop()
