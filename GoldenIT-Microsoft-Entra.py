@@ -73,7 +73,7 @@ def load_sent_done_set():
                 for l in f:
                     if l.strip():
                         s.add(l.strip().lower())
-        except: pass
+        except Exception: pass
     return s
 
 @dataclass
@@ -108,6 +108,7 @@ class GoldenITEntraGUI:
         # async locks (set in runner/main_batch)
         self.emails_lock = None
         self.account_lock = None
+        self.summary_lock = None
         self.account_index = 0
 
         # ----------- UI Layout -----------
@@ -273,9 +274,12 @@ class GoldenITEntraGUI:
                         if e and p:
                             accs.append(Account(email=e.strip(), password=p.strip(), secret=s.strip()))
             if accs:
-                # keep new accounts; worker tasks will pick from updated self.accounts (workers use shared account_index)
-                self.accounts = accs
-                self.summary['Total'] = len(accs)
+                # Schedule account update with lock protection in async context
+                async def update_accounts():
+                    async with self.account_lock:
+                        self.accounts = accs
+                        self.summary['Total'] = len(accs)
+                asyncio.run_coroutine_threadsafe(update_accounts(), self.async_loop).result(timeout=5)
                 self.status_q.put({"msg": f"Accounts reloaded: {len(accs)}", "lvl": "INFO", "summary": {"Total": len(accs)}})
             # reload emails, excluding already sent ones
             sent_done = load_sent_done_set()
@@ -284,10 +288,11 @@ class GoldenITEntraGUI:
                     eml = [l.strip() for l in f if "@" in l]
                 # Filter out already sent
                 new_emails = [e for e in eml if e.strip().lower() not in sent_done and e.strip() not in self.failed_emails]
-                # insert these at front of queue so they get processed next
-                # we will replace the current queue with new_emails + existing (unprocessed)
-                # current self.emails may have remaining ones from before pause; we prefer to use updated file so replace
-                self.emails = new_emails
+                # Schedule email update with lock protection in async context
+                async def update_emails():
+                    async with self.emails_lock:
+                        self.emails = new_emails
+                asyncio.run_coroutine_threadsafe(update_emails(), self.async_loop).result(timeout=5)
                 self.status_q.put({"msg": f"Emails reloaded: {len(new_emails)}", "lvl": "INFO"})
             else:
                 self.status_q.put({"msg": "Emails file not found on reload.", "lvl": "WARN"})
@@ -338,6 +343,7 @@ class GoldenITEntraGUI:
         # async locks for coordinated access to shared queues & account rotation
         self.emails_lock = asyncio.Lock()
         self.account_lock = asyncio.Lock()
+        self.summary_lock = asyncio.Lock()
         self.account_index = 0
         tasks = []
         # create worker tasks (workers choose an account each time in round-robin)
@@ -390,14 +396,17 @@ class GoldenITEntraGUI:
                     try:
                         await self.process_account_batch(page, acc, my_emails, worker_id)
                     except Exception as e:
+                        async with self.summary_lock:
+                            processed = self.summary["Processed"] + len(my_emails)
+                            fail = self.summary["Fail"] + len(my_emails)
                         self.status_q.put({
                             "msg": f"{acc.email} BATCH FAILED: {e}",
                             "lvl": "ERROR",
                             "logrow": [acc.email, "", "Fail", str(e), datetime.datetime.now().isoformat()],
                             "failacc": acc.email,
                             "summary": {
-                                "Processed": self.summary["Processed"]+len(my_emails),
-                                "Fail": self.summary["Fail"]+len(my_emails)
+                                "Processed": processed,
+                                "Fail": fail
                             }
                         })
                 try:
@@ -468,13 +477,16 @@ class GoldenITEntraGUI:
                     if not emailbox:
                         self.status_q.put({"msg": f"{acc.email}: Email input not found.", "lvl": "ERROR", "failacc": acc.email})
                         # count as failed for this email
+                        async with self.summary_lock:
+                            processed = self.summary["Processed"] + 1
+                            fail = self.summary["Fail"] + 1
                         self.status_q.put({
                             "msg": f"{acc.email}: Email add failed for {email} (input missing).",
                             "lvl": "ERROR",
                             "faileml": email,
                             "summary": {
-                                "Processed": self.summary["Processed"]+1,
-                                "Fail": self.summary["Fail"]+1
+                                "Processed": processed,
+                                "Fail": fail
                             }
                         })
                         continue
@@ -501,13 +513,16 @@ class GoldenITEntraGUI:
                             await asyncio.sleep(1)
                     # Success log, sent done & remove from .txt
                     row = [acc.email, email, "Success", "", datetime.datetime.now().isoformat()]
+                    async with self.summary_lock:
+                        processed = self.summary["Processed"] + 1
+                        success = self.summary["Success"] + 1
                     self.status_q.put({
                         "msg": f"{acc.email}: Added {email}",
                         "lvl": "SUCCESS",
                         "logrow": row,
                         "summary": {
-                            "Processed": self.summary["Processed"]+1,
-                            "Success": self.summary["Success"]+1
+                            "Processed": processed,
+                            "Success": success
                         }
                     })
                     save_sent_done(email)
@@ -517,14 +532,17 @@ class GoldenITEntraGUI:
                     except Exception as e:
                         print(f"Trying to remove {email} failed: {e}")
                 except Exception as e:
+                    async with self.summary_lock:
+                        processed = self.summary["Processed"] + 1
+                        fail = self.summary["Fail"] + 1
                     self.status_q.put({
                         "msg": f"{acc.email}: Email add failed. {e}",
                         "lvl": "ERROR",
                         "failacc": acc.email,
                         "faileml": email,
                         "summary": {
-                            "Processed": self.summary["Processed"]+1,
-                            "Fail": self.summary["Fail"]+1
+                            "Processed": processed,
+                            "Fail": fail
                         }
                     })
                     continue
