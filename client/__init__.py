@@ -1,0 +1,1 @@
+# GoldenIT Entra Client Package
