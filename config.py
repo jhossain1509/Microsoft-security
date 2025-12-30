@@ -12,7 +12,16 @@ APP_TITLE = f"{APP_NAME} {APP_VERSION}"
 # Server Configuration
 SERVER_HOST = "0.0.0.0"
 SERVER_PORT = 5000
-SECRET_KEY = os.environ.get('SECRET_KEY', 'golden-it-secret-key-change-in-production')
+
+# Generate a secure secret key if not set in environment
+# In production, set this via environment variable: export SECRET_KEY='your-secret-key'
+_default_secret = os.environ.get('SECRET_KEY')
+if not _default_secret:
+    # Generate a random key and warn user
+    import secrets
+    _default_secret = secrets.token_hex(32)
+    print("WARNING: Using auto-generated SECRET_KEY. Set SECRET_KEY environment variable in production!")
+SECRET_KEY = _default_secret
 
 # Database Configuration
 DATABASE_PATH = os.path.join(os.path.dirname(__file__), 'data', 'app.db')

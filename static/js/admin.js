@@ -11,11 +11,15 @@ document.addEventListener('DOMContentLoaded', () => {
 async function loadUsers() {
     try {
         const response = await fetch('/api/admin/users');
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
         users = await response.json();
         renderUsersTable();
         updateStats();
     } catch (error) {
         console.error('Error loading users:', error);
+        alert('Failed to load users. Please refresh the page.');
     }
 }
 

@@ -231,6 +231,11 @@ def upload_screenshot():
     if not user_id:
         return jsonify({"error": "User ID required"}), 400
     
+    # Validate file type
+    allowed_extensions = {'png', 'jpg', 'jpeg', 'gif'}
+    if '.' not in file.filename or file.filename.rsplit('.', 1)[1].lower() not in allowed_extensions:
+        return jsonify({"error": "Invalid file type"}), 400
+    
     # Generate filename
     timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
     filename = f"screenshot_{user_id}_{timestamp}.png"
@@ -239,13 +244,23 @@ def upload_screenshot():
     # Save file
     file.save(filepath)
     
-    # Create thumbnail
-    from PIL import Image
-    img = Image.open(filepath)
-    img.thumbnail(THUMBNAIL_SIZE)
-    thumbnail_filename = f"thumb_{filename}"
-    thumbnail_path = os.path.join(SCREENSHOT_DIR, thumbnail_filename)
-    img.save(thumbnail_path)
+    # Validate it's a real image using PIL
+    try:
+        from PIL import Image
+        img = Image.open(filepath)
+        img.verify()  # Verify it's a valid image
+        
+        # Reopen for thumbnail (verify() closes the file)
+        img = Image.open(filepath)
+        img.thumbnail(THUMBNAIL_SIZE)
+        thumbnail_filename = f"thumb_{filename}"
+        thumbnail_path = os.path.join(SCREENSHOT_DIR, thumbnail_filename)
+        img.save(thumbnail_path)
+    except Exception as e:
+        # If validation fails, remove the file
+        if os.path.exists(filepath):
+            os.remove(filepath)
+        return jsonify({"error": "Invalid image file"}), 400
     
     # Save to database
     db.save_screenshot(user_id, filename, thumbnail_filename)
@@ -255,7 +270,14 @@ def upload_screenshot():
 @app.route('/api/screenshot/<filename>')
 @login_required
 def get_screenshot(filename):
+    # Sanitize filename to prevent path traversal
+    filename = os.path.basename(filename)
     filepath = os.path.join(SCREENSHOT_DIR, filename)
+    
+    # Verify the path is within SCREENSHOT_DIR
+    if not os.path.abspath(filepath).startswith(os.path.abspath(SCREENSHOT_DIR)):
+        return jsonify({"error": "Invalid filename"}), 400
+    
     if os.path.exists(filepath):
         return send_file(filepath)
     return jsonify({"error": "File not found"}), 404

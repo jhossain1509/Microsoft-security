@@ -11,10 +11,14 @@ document.addEventListener('DOMContentLoaded', () => {
 async function loadUserActivities() {
     try {
         const response = await fetch('/api/user/activities?limit=50');
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
         const activities = await response.json();
         renderActivitiesTable(activities);
     } catch (error) {
         console.error('Error loading activities:', error);
+        // Don't show alert for this, just log it
     }
 }
 

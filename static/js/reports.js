@@ -13,6 +13,9 @@ async function loadUserReport() {
 
     try {
         const response = await fetch(`/api/admin/user/${userId}/stats?days=${timePeriod}`);
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
         const data = await response.json();
 
         document.getElementById('reportContent').style.display = 'block';
@@ -28,7 +31,7 @@ async function loadUserReport() {
         renderCharts(data.stats);
     } catch (error) {
         console.error('Error loading report:', error);
-        alert('Error loading report data');
+        alert('Failed to load report data. Please try again.');
     }
 }
 

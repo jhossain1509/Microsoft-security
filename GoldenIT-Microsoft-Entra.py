@@ -271,6 +271,12 @@ class GoldenITEntraGUI:
                 },
                 timeout=5
             )
+            
+            # Check HTTP status code
+            if not response.ok:
+                self.logit(f"❌ Server returned error: {response.status_code}", "ERROR")
+                return False
+            
             result = response.json()
             
             if result.get('valid'):
@@ -293,8 +299,11 @@ class GoldenITEntraGUI:
             else:
                 self.logit(f"❌ License validation failed: {result.get('message')}", "ERROR")
                 return False
-        except Exception as e:
+        except requests.exceptions.RequestException as e:
             self.logit(f"⚠️ Cannot connect to license server: {e}", "WARN")
+            return False
+        except Exception as e:
+            self.logit(f"⚠️ License validation error: {e}", "WARN")
             return False
 
     def show_license_dialog(self):

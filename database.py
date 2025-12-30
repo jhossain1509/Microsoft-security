@@ -121,8 +121,25 @@ class Database:
     
     @staticmethod
     def hash_password(password: str) -> str:
-        """Hash password using SHA-256"""
-        return hashlib.sha256(password.encode()).hexdigest()
+        """Hash password using SHA-256 with salt"""
+        import secrets
+        # Generate a random salt
+        salt = secrets.token_hex(16)
+        # Hash password with salt
+        password_hash = hashlib.sha256((salt + password).encode()).hexdigest()
+        # Return salt:hash format
+        return f"{salt}:{password_hash}"
+    
+    @staticmethod
+    def verify_password(password: str, stored_hash: str) -> bool:
+        """Verify password against stored hash"""
+        if ':' not in stored_hash:
+            # Legacy format without salt (backwards compatibility)
+            return hashlib.sha256(password.encode()).hexdigest() == stored_hash
+        
+        salt, password_hash = stored_hash.split(':', 1)
+        computed_hash = hashlib.sha256((salt + password).encode()).hexdigest()
+        return computed_hash == password_hash
     
     @staticmethod
     def generate_license_key() -> str:
@@ -152,21 +169,24 @@ class Database:
         """Authenticate user and return user info"""
         conn = self.get_connection()
         cursor = conn.cursor()
-        password_hash = self.hash_password(password)
         cursor.execute(
-            "SELECT * FROM users WHERE username=? AND password_hash=? AND is_active=1",
-            (username, password_hash)
+            "SELECT * FROM users WHERE username=? AND is_active=1",
+            (username,)
         )
         user = cursor.fetchone()
-        if user:
+        
+        if user and self.verify_password(password, user['password_hash']):
             # Update last login
             cursor.execute(
                 "UPDATE users SET last_login=CURRENT_TIMESTAMP WHERE id=?",
                 (user['id'],)
             )
             conn.commit()
+            conn.close()
+            return dict(user)
+        
         conn.close()
-        return dict(user) if user else None
+        return None
     
     def get_user(self, user_id: int) -> Optional[Dict]:
         """Get user by ID"""
