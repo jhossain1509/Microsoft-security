@@ -165,3 +165,84 @@ INSERT INTO settings (setting_key, setting_value, description) VALUES
   ('app_version', '1.0.0', 'Current application version'),
   ('maintenance_mode', '0', 'Maintenance mode (1=on, 0=off)')
 ON DUPLICATE KEY UPDATE setting_key=setting_key;
+
+-- ========== Analytics Tables ==========
+
+-- Daily statistics table
+CREATE TABLE IF NOT EXISTS daily_stats (
+  id CHAR(36) PRIMARY KEY,
+  user_id CHAR(36) NOT NULL,
+  date DATE NOT NULL,
+  emails_added INT NOT NULL DEFAULT 0,
+  emails_failed INT NOT NULL DEFAULT 0,
+  accounts_used INT NOT NULL DEFAULT 0,
+  success_rate DECIMAL(5,2) DEFAULT 0.00,
+  total_time_minutes INT DEFAULT 0,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY unique_user_date (user_id, date),
+  INDEX idx_user_id (user_id),
+  INDEX idx_date (date),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Weekly statistics table
+CREATE TABLE IF NOT EXISTS weekly_stats (
+  id CHAR(36) PRIMARY KEY,
+  user_id CHAR(36) NOT NULL,
+  week_start DATE NOT NULL,
+  week_end DATE NOT NULL,
+  total_emails_added INT NOT NULL DEFAULT 0,
+  total_emails_failed INT NOT NULL DEFAULT 0,
+  total_accounts_used INT NOT NULL DEFAULT 0,
+  avg_success_rate DECIMAL(5,2) DEFAULT 0.00,
+  total_time_minutes INT DEFAULT 0,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY unique_user_week (user_id, week_start),
+  INDEX idx_user_id (user_id),
+  INDEX idx_week_start (week_start),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Monthly statistics table
+CREATE TABLE IF NOT EXISTS monthly_stats (
+  id CHAR(36) PRIMARY KEY,
+  user_id CHAR(36) NOT NULL,
+  month INT NOT NULL,
+  year INT NOT NULL,
+  total_emails_added INT NOT NULL DEFAULT 0,
+  total_emails_failed INT NOT NULL DEFAULT 0,
+  total_accounts_used INT NOT NULL DEFAULT 0,
+  avg_success_rate DECIMAL(5,2) DEFAULT 0.00,
+  total_time_minutes INT DEFAULT 0,
+  peak_day DATE NULL,
+  peak_day_count INT DEFAULT 0,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY unique_user_month (user_id, year, month),
+  INDEX idx_user_id (user_id),
+  INDEX idx_year_month (year, month),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Activity sessions table (for detailed tracking)
+CREATE TABLE IF NOT EXISTS activity_sessions (
+  id CHAR(36) PRIMARY KEY,
+  user_id CHAR(36) NOT NULL,
+  machine_id VARCHAR(255) NOT NULL,
+  session_start DATETIME NOT NULL,
+  session_end DATETIME NULL,
+  emails_processed INT DEFAULT 0,
+  emails_success INT DEFAULT 0,
+  emails_failed INT DEFAULT 0,
+  accounts_used TEXT NULL COMMENT 'JSON array of account emails used',
+  status ENUM('active','completed','failed','interrupted') DEFAULT 'active',
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_user_id (user_id),
+  INDEX idx_machine_id (machine_id),
+  INDEX idx_session_start (session_start),
+  INDEX idx_status (status),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
