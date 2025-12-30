@@ -11,6 +11,15 @@ from playwright.async_api import async_playwright
 from threading import Lock
 email_remove_lock = Lock()
 
+# System tray imports
+try:
+    import pystray
+    from PIL import Image, ImageDraw
+    TRAY_AVAILABLE = True
+except ImportError:
+    print("pystray not available - system tray disabled")
+    TRAY_AVAILABLE = False
+
 # Import client modules for server integration
 try:
     from client.core.api_client import get_api_client
@@ -106,6 +115,11 @@ class GoldenITEntraGUI:
         self.failed_emails = []
         self.log_rows = []
         self.summary = {"Total": 0, "Processed": 0, "Success": 0, "Fail": 0, "Skipped": 0}
+        
+        # System tray setup
+        self.tray_icon = None
+        self.tray_thread = None
+        self.is_quitting = False
         
         # Server integration
         self.server_enabled = SERVER_INTEGRATION
@@ -664,7 +678,110 @@ class GoldenITEntraGUI:
                 try: await browser.close()
                 except: pass
 
+    # ========== System Tray Methods ==========
+    def create_tray_icon(self):
+        """Create system tray icon with menu"""
+        if not TRAY_AVAILABLE:
+            return
+        
+        # Create a simple icon
+        def create_image():
+            width = 64
+            height = 64
+            image = Image.new('RGB', (width, height), color='#667eea')
+            dc = ImageDraw.Draw(image)
+            dc.rectangle([16, 16, 48, 48], fill='white')
+            return image
+        
+        # Create menu
+        menu = pystray.Menu(
+            pystray.MenuItem('Show', self.show_window, default=True),
+            pystray.MenuItem('Hide', self.hide_window),
+            pystray.MenuItem('Exit', self.quit_application)
+        )
+        
+        # Create icon
+        self.tray_icon = pystray.Icon(
+            "GoldenIT Entra",
+            create_image(),
+            "GoldenIT Entra - Click to show",
+            menu
+        )
+        
+        # Run in separate thread
+        self.tray_thread = threading.Thread(target=self.tray_icon.run, daemon=True)
+        self.tray_thread.start()
+    
+    def show_window(self, icon=None, item=None):
+        """Show window from tray"""
+        self.root.after(0, self._show_window_impl)
+    
+    def _show_window_impl(self):
+        """Implementation to run in main thread"""
+        self.root.deiconify()
+        self.root.lift()
+        self.root.focus_force()
+    
+    def hide_window(self, icon=None, item=None):
+        """Hide window to tray"""
+        self.root.after(0, self.root.withdraw)
+    
+    def on_closing(self):
+        """Handle window close button - minimize to tray on first close"""
+        if not self.is_quitting:
+            if TRAY_AVAILABLE:
+                # First close - minimize to tray
+                self.hide_window()
+                if not self.tray_icon:
+                    self.create_tray_icon()
+            else:
+                # No tray available - ask to quit
+                if messagebox.askokcancel("Quit", "Do you want to quit the application?"):
+                    self.quit_application()
+        else:
+            # Already quitting - proceed
+            self.root.destroy()
+    
+    def quit_application(self, icon=None, item=None):
+        """Final cleanup and exit"""
+        self.is_quitting = True
+        
+        # Stop background threads
+        if hasattr(self, 'screenshot_manager') and self.screenshot_manager:
+            try:
+                self.screenshot_manager.stop()
+            except:
+                pass
+        
+        if hasattr(self, 'heartbeat_manager') and self.heartbeat_manager:
+            try:
+                self.heartbeat_manager.stop()
+            except:
+                pass
+        
+        # Stop tray icon
+        if self.tray_icon:
+            try:
+                self.tray_icon.stop()
+            except:
+                pass
+        
+        # Destroy window
+        try:
+            self.root.quit()
+            self.root.destroy()
+        except:
+            pass
+
     def run(self):
+        # Set up close handler
+        self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+        
+        # Start system tray if available
+        if TRAY_AVAILABLE:
+            # Don't create immediately - create on first minimize
+            pass
+        
         self.root.mainloop()
 
 if __name__ == "__main__":
