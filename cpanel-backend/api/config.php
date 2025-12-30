@@ -6,6 +6,9 @@
 require_once __DIR__ . '/../config.php';
 require_once __DIR__ . '/../middleware/auth.php';
 
+// Set CORS headers for cross-origin requests
+setCorsHeaders();
+
 $method = $_SERVER['REQUEST_METHOD'];
 
 switch ($method) {
@@ -20,13 +23,9 @@ switch ($method) {
 }
 
 function handleGet() {
-    // Allow public access to config for initial client setup
-    // Authentication optional for GET (required for POST)
-    try {
-        $user = AuthMiddleware::getAuthUser(false); // false = optional auth
-    } catch (Exception $e) {
-        $user = null;
-    }
+    // Public endpoint - no authentication required for GET
+    // This allows clients to get initial config before login
+    // No sensitive data is exposed here
     
     $db = getDB();
     
