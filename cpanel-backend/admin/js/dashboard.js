@@ -77,7 +77,7 @@ function logout() {
 }
 
 // Show Section
-function showSection(section) {
+function showSection(section, event) {
     // Hide all sections
     document.querySelectorAll('.content-section').forEach(el => {
         el.style.display = 'none';
@@ -92,7 +92,9 @@ function showSection(section) {
     document.getElementById(`section-${section}`).style.display = 'block';
     
     // Add active to nav link
-    event.target.classList.add('active');
+    if (event && event.target) {
+        event.target.classList.add('active');
+    }
     
     // Load section data
     switch(section) {
@@ -128,13 +130,13 @@ async function loadDashboard() {
     const events = await apiCall('events.php');
     const clients = await apiCall('heartbeat.php');
     
-    if (users) document.getElementById('stat-users').textContent = users.data.length;
-    if (licenses) document.getElementById('stat-licenses').textContent = licenses.data.length;
-    if (events) document.getElementById('stat-emails').textContent = events.data.length;
-    if (clients) document.getElementById('stat-clients').textContent = clients.data.active.length;
+    if (users && users.data) document.getElementById('stat-users').textContent = users.data.length;
+    if (licenses && licenses.data) document.getElementById('stat-licenses').textContent = licenses.data.length;
+    if (events && events.data) document.getElementById('stat-emails').textContent = events.data.length;
+    if (clients && clients.data && clients.data.active) document.getElementById('stat-clients').textContent = clients.data.active.length;
     
     // Load recent activity
-    if (events && events.data) {
+    if (events && events.data && events.data.length > 0) {
         const recentHtml = events.data.slice(0, 10).map(event => `
             <div class="d-flex justify-content-between align-items-center mb-2 pb-2 border-bottom">
                 <div>
@@ -145,7 +147,9 @@ async function loadDashboard() {
             </div>
         `).join('');
         
-        document.getElementById('recent-activity-list').innerHTML = recentHtml || 'No recent activity';
+        document.getElementById('recent-activity-list').innerHTML = recentHtml;
+    } else {
+        document.getElementById('recent-activity-list').innerHTML = '<p class="text-muted">No recent activity</p>';
     }
 }
 
@@ -221,18 +225,26 @@ async function loadActivity() {
 async function loadScreenshots() {
     const data = await apiCall('screenshots.php?action=list&per_page=50');
     
-    if (!data || !data.data) return;
+    if (!data || !data.data) {
+        document.getElementById('screenshots-grid').innerHTML = '<div class="col-12"><p class="text-muted">No screenshots available</p></div>';
+        return;
+    }
     
     const grid = document.getElementById('screenshots-grid');
     grid.innerHTML = data.data.map(screenshot => `
-        <div class="col-md-3">
-            <div class="screenshot-card">
-                <img src="${API_URL}/screenshots.php?action=download&id=${screenshot.id}" alt="Screenshot">
-                <div class="screenshot-overlay">
-                    <small>${screenshot.user_email || 'Unknown'}</small><br>
-                    <small>${formatDate(screenshot.created_at)}</small>
-                    <button class="btn btn-sm btn-danger float-end" onclick="deleteScreenshot('${screenshot.id}')">
-                        <i class="bi bi-trash"></i>
+        <div class="col-md-3 mb-3">
+            <div class="card screenshot-card">
+                <img src="/Microsoft-Entra/api/screenshots.php?action=download&id=${screenshot.id}&token=${accessToken}" 
+                     class="card-img-top" alt="Screenshot" style="height: 200px; object-fit: cover;">
+                <div class="card-body">
+                    <p class="card-text small mb-1">
+                        <i class="bi bi-person"></i> ${screenshot.user_email || 'Unknown'}
+                    </p>
+                    <p class="card-text small mb-2">
+                        <i class="bi bi-clock"></i> ${formatDate(screenshot.created_at)}
+                    </p>
+                    <button class="btn btn-sm btn-danger w-100" onclick="deleteScreenshot('${screenshot.id}')">
+                        <i class="bi bi-trash"></i> Delete
                     </button>
                 </div>
             </div>
@@ -244,15 +256,18 @@ async function loadScreenshots() {
 async function loadClients() {
     const data = await apiCall('heartbeat.php');
     
-    if (!data || !data.data) return;
+    if (!data || !data.data || !data.data.active) {
+        document.getElementById('clients-table-body').innerHTML = '<tr><td colspan="6" class="text-muted text-center">No active clients</td></tr>';
+        return;
+    }
     
     const tbody = document.getElementById('clients-table-body');
     tbody.innerHTML = data.data.active.map(client => `
         <tr>
             <td>${client.user_email || 'Unknown'}</td>
-            <td><code>${client.machine_id.substring(0, 12)}...</code></td>
+            <td><code>${(client.machine_id || '').substring(0, 12)}...</code></td>
             <td><span class="badge status-${client.status}">${client.status}</span></td>
-            <td>${client.ip}</td>
+            <td>${client.ip || 'N/A'}</td>
             <td>${client.version || 'N/A'}</td>
             <td>${formatDate(client.last_activity)}</td>
         </tr>
@@ -321,13 +336,17 @@ async function createLicense() {
 
 // Delete Functions
 async function deleteUser(id) {
-    if (!confirm('Are you sure you want to delete this user?')) return;
+    if (!confirm('Are you sure you want to deactivate this user?\n\nNote: This is a soft delete. User data will be preserved but the account will be deactivated.')) return;
     
     const result = await apiCall(`users.php?id=${id}`, {method: 'DELETE'});
     
-    if (result && result.success) {
-        showToast('User deleted', 'success');
-        loadUsers();
+    if (result) {
+        if (result.success) {
+            showToast('User deactivated successfully', 'success');
+            loadUsers();
+        } else if (result.error) {
+            showToast(result.error, 'danger');
+        }
     }
 }
 

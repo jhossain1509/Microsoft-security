@@ -137,6 +137,9 @@ function setCorsHeaders() {
     
     if (in_array($origin, CORS_ALLOWED_ORIGINS)) {
         header("Access-Control-Allow-Origin: $origin");
+    } else {
+        // Allow all origins for API access (can be restricted later)
+        header("Access-Control-Allow-Origin: *");
     }
     
     header("Access-Control-Allow-Methods: GET, POST, PUT, PATCH, DELETE, OPTIONS");
@@ -150,8 +153,8 @@ function setCorsHeaders() {
     }
 }
 
-// Call CORS headers on every request
-setCorsHeaders();
+// Note: Each API endpoint should call setCorsHeaders() explicitly
+// Don't call it globally here to avoid premature exit on OPTIONS
 
 // Audit Log Function
 function logAudit($userId, $action, $objectType = null, $objectId = null, $details = null) {
