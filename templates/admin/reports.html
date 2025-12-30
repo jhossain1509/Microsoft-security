@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Reports - GoldenIT Microsoft Entra v-1.2</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <div class="dashboard-container">
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <div class="logo">
+                <h2>🌟 GoldenIT</h2>
+                <p class="version">Microsoft Entra v-1.2</p>
+            </div>
+            <nav class="nav-menu">
+                <a href="/admin/dashboard" class="nav-item">
+                    <span class="icon">📊</span> Dashboard
+                </a>
+                <a href="/admin/reports" class="nav-item active">
+                    <span class="icon">📈</span> Reports
+                </a>
+                <a href="/logout" class="nav-item">
+                    <span class="icon">🚪</span> Logout
+                </a>
+            </nav>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <header class="content-header">
+                <h1>User Reports & Analytics</h1>
+            </header>
+
+            <!-- Filters -->
+            <div class="content-section">
+                <div class="filters-row">
+                    <div class="form-group">
+                        <label>Select User</label>
+                        <select id="userSelect" onchange="loadUserReport()">
+                            <option value="">-- Select User --</option>
+                            {% for user in users %}
+                            <option value="{{ user.id }}">{{ user.username }} ({{ user.email }})</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Time Period</label>
+                        <select id="timePeriod" onchange="loadUserReport()">
+                            <option value="7">Last 7 Days</option>
+                            <option value="30" selected>Last 30 Days</option>
+                            <option value="90">Last 90 Days</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <button class="btn btn-success" onclick="exportReport()">📥 Export CSV</button>
+                    </div>
+                </div>
+            </div>
+
+            <div id="reportContent" style="display: none;">
+                <!-- Summary Stats -->
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-icon">🔑</div>
+                        <div class="stat-info">
+                            <h3 id="userLicenseCount">0</h3>
+                            <p>Active Licenses</p>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon">💻</div>
+                        <div class="stat-info">
+                            <h3 id="userActivePCs">0</h3>
+                            <p>Active PCs</p>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon">✉️</div>
+                        <div class="stat-info">
+                            <h3 id="userTotalEmails">0</h3>
+                            <p>Total Emails Added</p>
+                        </div>
+                    </div>
+                    <div class="stat-card success">
+                        <div class="stat-icon">✅</div>
+                        <div class="stat-info">
+                            <h3 id="userSuccessRate">0%</h3>
+                            <p>Success Rate</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Charts -->
+                <div class="charts-row">
+                    <div class="chart-container">
+                        <h3>Daily Activity</h3>
+                        <canvas id="dailyChart"></canvas>
+                    </div>
+                    <div class="chart-container">
+                        <h3>Success vs Failed</h3>
+                        <canvas id="pieChart"></canvas>
+                    </div>
+                </div>
+
+                <!-- Licenses Table -->
+                <div class="content-section">
+                    <h3>User Licenses</h3>
+                    <div class="table-container">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>License Key</th>
+                                    <th>Max PCs</th>
+                                    <th>Active PCs</th>
+                                    <th>Expires</th>
+                                    <th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody id="licensesTableBody">
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Activity Log -->
+                <div class="content-section">
+                    <h3>Recent Activity (Last 100)</h3>
+                    <div class="table-container">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Date/Time</th>
+                                    <th>Account Email</th>
+                                    <th>Target Email</th>
+                                    <th>Status</th>
+                                    <th>Error</th>
+                                </tr>
+                            </thead>
+                            <tbody id="activitiesTableBody">
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/reports.js') }}"></script>
+</body>
+</html>

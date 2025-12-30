@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>User Dashboard - GoldenIT Microsoft Entra v-1.2</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <div class="dashboard-container">
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <div class="logo">
+                <h2>🌟 GoldenIT</h2>
+                <p class="version">Microsoft Entra v-1.2</p>
+            </div>
+            <nav class="nav-menu">
+                <a href="/user/dashboard" class="nav-item active">
+                    <span class="icon">📊</span> Dashboard
+                </a>
+                <a href="/logout" class="nav-item">
+                    <span class="icon">🚪</span> Logout
+                </a>
+            </nav>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <header class="content-header">
+                <h1>My Dashboard</h1>
+                <button class="btn btn-primary" onclick="exportMyData()">📥 Export Data</button>
+            </header>
+
+            <!-- Stats Cards -->
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-icon">🔑</div>
+                    <div class="stat-info">
+                        <h3 id="myLicenses">{{ licenses|length }}</h3>
+                        <p>My Licenses</p>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon">✉️</div>
+                    <div class="stat-info">
+                        <h3 id="myTotalEmails">{{ stats.totals.total_success }}</h3>
+                        <p>Emails Added</p>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon">✅</div>
+                    <div class="stat-info">
+                        <h3 id="mySuccessRate">
+                            {% if stats.totals.total_activities > 0 %}
+                            {{ (stats.totals.total_success * 100 / stats.totals.total_activities)|round|int }}%
+                            {% else %}
+                            0%
+                            {% endif %}
+                        </h3>
+                        <p>Success Rate</p>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon">📅</div>
+                    <div class="stat-info">
+                        <h3 id="todayEmails">0</h3>
+                        <p>Today's Activity</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Chart -->
+            <div class="content-section">
+                <h3>Last 30 Days Activity</h3>
+                <canvas id="activityChart"></canvas>
+            </div>
+
+            <!-- My Licenses -->
+            <div class="content-section">
+                <h3>My Licenses</h3>
+                <div class="table-container">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>License Key</th>
+                                <th>Max PCs</th>
+                                <th>Active PCs</th>
+                                <th>Expires</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for license in licenses %}
+                            <tr>
+                                <td><code>{{ license.license_key }}</code></td>
+                                <td>{{ license.max_pcs }}</td>
+                                <td>{{ license.active_pcs }}</td>
+                                <td>{{ license.expires_at or 'Never' }}</td>
+                                <td>
+                                    {% if license.is_active %}
+                                    <span class="badge badge-success">Active</span>
+                                    {% else %}
+                                    <span class="badge badge-danger">Inactive</span>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Screenshots -->
+            <div class="content-section">
+                <div class="section-header">
+                    <h3>Recent Screenshots</h3>
+                    <button class="btn btn-secondary" onclick="refreshScreenshots()">🔄 Refresh</button>
+                </div>
+                <div id="screenshotsGrid" class="screenshots-grid">
+                    <!-- Populated by JavaScript -->
+                </div>
+            </div>
+
+            <!-- Recent Activities -->
+            <div class="content-section">
+                <h3>Recent Activities</h3>
+                <div class="table-container">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Date/Time</th>
+                                <th>Account Email</th>
+                                <th>Target Email</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="activitiesTable">
+                            <!-- Populated by JavaScript -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Screenshot Modal -->
+    <div id="screenshotModal" class="modal" style="display: none;">
+        <div class="modal-content modal-large">
+            <div class="modal-header">
+                <h3>Screenshot Preview</h3>
+                <span class="close" onclick="closeModal('screenshotModal')">&times;</span>
+            </div>
+            <div class="modal-body">
+                <img id="screenshotPreview" src="" style="max-width: 100%;">
+            </div>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/user.js') }}"></script>
+</body>
+</html>

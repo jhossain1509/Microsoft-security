@@ -1,0 +1,457 @@
+"""
+Database models and initialization for GoldenIT Microsoft Entra v-1.2
+"""
+
+import sqlite3
+import hashlib
+import secrets
+import datetime
+from typing import Optional, List, Dict
+from config import DATABASE_PATH, LICENSE_KEY_LENGTH, MAX_PCS_PER_LICENSE
+
+class Database:
+    def __init__(self, db_path=DATABASE_PATH):
+        self.db_path = db_path
+        self.init_db()
+    
+    def get_connection(self):
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        return conn
+    
+    def init_db(self):
+        """Initialize database tables"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        # Users table
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT UNIQUE NOT NULL,
+                email TEXT UNIQUE NOT NULL,
+                password_hash TEXT NOT NULL,
+                role TEXT NOT NULL DEFAULT 'user',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                last_login TIMESTAMP,
+                is_active INTEGER DEFAULT 1
+            )
+        ''')
+        
+        # Licenses table
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS licenses (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                license_key TEXT UNIQUE NOT NULL,
+                max_pcs INTEGER DEFAULT 1,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                expires_at TIMESTAMP,
+                is_active INTEGER DEFAULT 1,
+                FOREIGN KEY (user_id) REFERENCES users (id)
+            )
+        ''')
+        
+        # PC Activations table
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS pc_activations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                license_id INTEGER NOT NULL,
+                pc_id TEXT NOT NULL,
+                pc_name TEXT,
+                activated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (license_id) REFERENCES licenses (id),
+                UNIQUE(license_id, pc_id)
+            )
+        ''')
+        
+        # Email Activity Log
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS email_activities (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                account_email TEXT NOT NULL,
+                target_email TEXT NOT NULL,
+                status TEXT NOT NULL,
+                error_message TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                date_only TEXT,
+                FOREIGN KEY (user_id) REFERENCES users (id)
+            )
+        ''')
+        
+        # Screenshots table
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS screenshots (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                filename TEXT NOT NULL,
+                thumbnail_filename TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users (id)
+            )
+        ''')
+        
+        # Daily Statistics
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS daily_stats (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                date TEXT NOT NULL,
+                emails_added INTEGER DEFAULT 0,
+                emails_failed INTEGER DEFAULT 0,
+                accounts_used INTEGER DEFAULT 0,
+                FOREIGN KEY (user_id) REFERENCES users (id),
+                UNIQUE(user_id, date)
+            )
+        ''')
+        
+        # Create default admin user if not exists
+        cursor.execute("SELECT COUNT(*) as count FROM users WHERE username='admin'")
+        if cursor.fetchone()['count'] == 0:
+            admin_hash = self.hash_password('admin123')
+            cursor.execute(
+                "INSERT INTO users (username, email, password_hash, role) VALUES (?, ?, ?, ?)",
+                ('admin', 'admin@goldenit.local', admin_hash, 'admin')
+            )
+        
+        conn.commit()
+        conn.close()
+    
+    @staticmethod
+    def hash_password(password: str) -> str:
+        """Hash password using SHA-256"""
+        return hashlib.sha256(password.encode()).hexdigest()
+    
+    @staticmethod
+    def generate_license_key() -> str:
+        """Generate a random license key"""
+        return secrets.token_hex(LICENSE_KEY_LENGTH // 2).upper()
+    
+    # ===== User Operations =====
+    
+    def create_user(self, username: str, email: str, password: str, role: str = 'user') -> Optional[int]:
+        """Create a new user"""
+        try:
+            conn = self.get_connection()
+            cursor = conn.cursor()
+            password_hash = self.hash_password(password)
+            cursor.execute(
+                "INSERT INTO users (username, email, password_hash, role) VALUES (?, ?, ?, ?)",
+                (username, email, password_hash, role)
+            )
+            user_id = cursor.lastrowid
+            conn.commit()
+            conn.close()
+            return user_id
+        except sqlite3.IntegrityError:
+            return None
+    
+    def authenticate_user(self, username: str, password: str) -> Optional[Dict]:
+        """Authenticate user and return user info"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        password_hash = self.hash_password(password)
+        cursor.execute(
+            "SELECT * FROM users WHERE username=? AND password_hash=? AND is_active=1",
+            (username, password_hash)
+        )
+        user = cursor.fetchone()
+        if user:
+            # Update last login
+            cursor.execute(
+                "UPDATE users SET last_login=CURRENT_TIMESTAMP WHERE id=?",
+                (user['id'],)
+            )
+            conn.commit()
+        conn.close()
+        return dict(user) if user else None
+    
+    def get_user(self, user_id: int) -> Optional[Dict]:
+        """Get user by ID"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM users WHERE id=?", (user_id,))
+        user = cursor.fetchone()
+        conn.close()
+        return dict(user) if user else None
+    
+    def get_all_users(self) -> List[Dict]:
+        """Get all users"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM users ORDER BY created_at DESC")
+        users = [dict(row) for row in cursor.fetchall()]
+        conn.close()
+        return users
+    
+    def update_user(self, user_id: int, **kwargs) -> bool:
+        """Update user information"""
+        allowed_fields = ['username', 'email', 'role', 'is_active']
+        updates = []
+        values = []
+        for key, value in kwargs.items():
+            if key in allowed_fields:
+                updates.append(f"{key}=?")
+                values.append(value)
+        
+        if not updates:
+            return False
+        
+        values.append(user_id)
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            f"UPDATE users SET {', '.join(updates)} WHERE id=?",
+            values
+        )
+        conn.commit()
+        conn.close()
+        return True
+    
+    def delete_user(self, user_id: int) -> bool:
+        """Delete user (soft delete)"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("UPDATE users SET is_active=0 WHERE id=?", (user_id,))
+        conn.commit()
+        conn.close()
+        return True
+    
+    # ===== License Operations =====
+    
+    def create_license(self, user_id: int, max_pcs: int = 1, expires_days: int = 365) -> Optional[str]:
+        """Create a new license for user"""
+        license_key = self.generate_license_key()
+        expires_at = datetime.datetime.now() + datetime.timedelta(days=expires_days)
+        
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO licenses (user_id, license_key, max_pcs, expires_at) VALUES (?, ?, ?, ?)",
+            (user_id, license_key, max_pcs, expires_at)
+        )
+        conn.commit()
+        conn.close()
+        return license_key
+    
+    def get_user_licenses(self, user_id: int) -> List[Dict]:
+        """Get all licenses for a user"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT l.*, 
+                   (SELECT COUNT(*) FROM pc_activations WHERE license_id=l.id) as active_pcs
+            FROM licenses l
+            WHERE l.user_id=? AND l.is_active=1
+            ORDER BY l.created_at DESC
+        """, (user_id,))
+        licenses = [dict(row) for row in cursor.fetchall()]
+        conn.close()
+        return licenses
+    
+    def validate_license(self, license_key: str, pc_id: str, pc_name: str = None) -> Dict:
+        """Validate and activate license on a PC"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        # Check if license exists and is active
+        cursor.execute("""
+            SELECT * FROM licenses 
+            WHERE license_key=? AND is_active=1 
+            AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)
+        """, (license_key,))
+        license = cursor.fetchone()
+        
+        if not license:
+            conn.close()
+            return {"valid": False, "message": "Invalid or expired license"}
+        
+        # Check PC activations
+        cursor.execute("""
+            SELECT COUNT(*) as count FROM pc_activations WHERE license_id=?
+        """, (license['id'],))
+        activation_count = cursor.fetchone()['count']
+        
+        # Check if this PC is already activated
+        cursor.execute("""
+            SELECT * FROM pc_activations WHERE license_id=? AND pc_id=?
+        """, (license['id'], pc_id))
+        existing_activation = cursor.fetchone()
+        
+        if existing_activation:
+            # Update last seen
+            cursor.execute("""
+                UPDATE pc_activations SET last_seen=CURRENT_TIMESTAMP WHERE id=?
+            """, (existing_activation['id'],))
+            conn.commit()
+            conn.close()
+            return {"valid": True, "message": "License validated", "user_id": license['user_id']}
+        
+        # Check if max PCs reached
+        if activation_count >= license['max_pcs']:
+            conn.close()
+            return {"valid": False, "message": f"Maximum PCs ({license['max_pcs']}) already activated"}
+        
+        # Activate new PC
+        cursor.execute("""
+            INSERT INTO pc_activations (license_id, pc_id, pc_name) VALUES (?, ?, ?)
+        """, (license['id'], pc_id, pc_name))
+        conn.commit()
+        conn.close()
+        return {"valid": True, "message": "License activated successfully", "user_id": license['user_id']}
+    
+    def update_license(self, license_id: int, **kwargs) -> bool:
+        """Update license"""
+        allowed_fields = ['max_pcs', 'expires_at', 'is_active']
+        updates = []
+        values = []
+        for key, value in kwargs.items():
+            if key in allowed_fields:
+                updates.append(f"{key}=?")
+                values.append(value)
+        
+        if not updates:
+            return False
+        
+        values.append(license_id)
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            f"UPDATE licenses SET {', '.join(updates)} WHERE id=?",
+            values
+        )
+        conn.commit()
+        conn.close()
+        return True
+    
+    def delete_license(self, license_id: int) -> bool:
+        """Delete license (soft delete)"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("UPDATE licenses SET is_active=0 WHERE id=?", (license_id,))
+        conn.commit()
+        conn.close()
+        return True
+    
+    # ===== Email Activity Operations =====
+    
+    def log_email_activity(self, user_id: int, account_email: str, target_email: str, 
+                          status: str, error_message: str = None):
+        """Log email activity"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        date_only = datetime.datetime.now().strftime('%Y-%m-%d')
+        cursor.execute("""
+            INSERT INTO email_activities 
+            (user_id, account_email, target_email, status, error_message, date_only)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (user_id, account_email, target_email, status, error_message, date_only))
+        
+        # Update daily stats
+        cursor.execute("""
+            INSERT INTO daily_stats (user_id, date, emails_added, emails_failed, accounts_used)
+            VALUES (?, ?, ?, ?, 1)
+            ON CONFLICT(user_id, date) DO UPDATE SET
+                emails_added = emails_added + ?,
+                emails_failed = emails_failed + ?
+        """, (
+            user_id, date_only,
+            1 if status == 'success' else 0,
+            1 if status == 'failed' else 0,
+            1 if status == 'success' else 0,
+            1 if status == 'failed' else 0
+        ))
+        
+        conn.commit()
+        conn.close()
+    
+    def get_user_activities(self, user_id: int, limit: int = 100, date_filter: str = None) -> List[Dict]:
+        """Get user activities"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        query = "SELECT * FROM email_activities WHERE user_id=?"
+        params = [user_id]
+        
+        if date_filter:
+            query += " AND date_only=?"
+            params.append(date_filter)
+        
+        query += " ORDER BY created_at DESC LIMIT ?"
+        params.append(limit)
+        
+        cursor.execute(query, params)
+        activities = [dict(row) for row in cursor.fetchall()]
+        conn.close()
+        return activities
+    
+    def get_user_stats(self, user_id: int, days: int = 30) -> Dict:
+        """Get user statistics"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        # Get daily stats for last N days
+        cursor.execute("""
+            SELECT * FROM daily_stats 
+            WHERE user_id=? AND date >= date('now', '-' || ? || ' days')
+            ORDER BY date DESC
+        """, (user_id, days))
+        daily_stats = [dict(row) for row in cursor.fetchall()]
+        
+        # Get total counts
+        cursor.execute("""
+            SELECT 
+                COUNT(*) as total_activities,
+                SUM(CASE WHEN status='success' THEN 1 ELSE 0 END) as total_success,
+                SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END) as total_failed
+            FROM email_activities
+            WHERE user_id=?
+        """, (user_id,))
+        totals = dict(cursor.fetchone())
+        
+        conn.close()
+        return {
+            "daily_stats": daily_stats,
+            "totals": totals
+        }
+    
+    # ===== Screenshot Operations =====
+    
+    def save_screenshot(self, user_id: int, filename: str, thumbnail_filename: str = None) -> int:
+        """Save screenshot record"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO screenshots (user_id, filename, thumbnail_filename)
+            VALUES (?, ?, ?)
+        """, (user_id, filename, thumbnail_filename))
+        screenshot_id = cursor.lastrowid
+        conn.commit()
+        conn.close()
+        return screenshot_id
+    
+    def get_user_screenshots(self, user_id: int, limit: int = 50) -> List[Dict]:
+        """Get user screenshots"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT * FROM screenshots WHERE user_id=?
+            ORDER BY created_at DESC LIMIT ?
+        """, (user_id, limit))
+        screenshots = [dict(row) for row in cursor.fetchall()]
+        conn.close()
+        return screenshots
+    
+    def delete_screenshot(self, screenshot_id: int) -> bool:
+        """Delete screenshot record"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM screenshots WHERE id=?", (screenshot_id,))
+        conn.commit()
+        conn.close()
+        return True
+
+# Initialize database
+db = Database()
