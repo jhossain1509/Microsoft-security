@@ -4,9 +4,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Dashboard - GoldenIT Entra Admin</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
-    <link rel="stylesheet" href="css/dashboard.css">
+    <link rel="stylesheet" href="css/dashboard-new.css">
 </head>
 <body>
     <!-- Top Navigation -->
@@ -72,74 +73,91 @@
             <!-- Main Content -->
             <main class="col-md-10 ms-sm-auto px-md-4">
                 <!-- Dashboard Section -->
-                <div id="section-dashboard" class="content-section">
-                    <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
-                        <h1 class="h2">Dashboard</h1>
+                <div id="section-dashboard" class="content-section active">
+                    <div class="page-header">
+                        <h1><i class="bi bi-speedometer2"></i> Dashboard Overview</h1>
+                        <p>Monitor your system performance and activity in real-time</p>
                     </div>
                     
                     <!-- Stats Cards -->
-                    <div class="row mb-4">
-                        <div class="col-md-3">
-                            <div class="card text-white bg-primary">
-                                <div class="card-body">
-                                    <div class="d-flex justify-content-between">
-                                        <div>
-                                            <h6 class="card-title">Total Users</h6>
-                                            <h2 id="stat-users">0</h2>
-                                        </div>
-                                        <div><i class="bi bi-people fs-1"></i></div>
+                    <div class="stats-grid">
+                        <div class="stat-card primary">
+                            <div class="stat-header">
+                                <div>
+                                    <div class="stat-title">Total Users</div>
+                                    <div class="stat-value" id="stat-users">0</div>
+                                    <div class="stat-change positive">
+                                        <i class="bi bi-arrow-up"></i> Active users
                                     </div>
+                                </div>
+                                <div class="stat-icon">
+                                    <i class="bi bi-people-fill"></i>
                                 </div>
                             </div>
                         </div>
-                        <div class="col-md-3">
-                            <div class="card text-white bg-success">
-                                <div class="card-body">
-                                    <div class="d-flex justify-content-between">
-                                        <div>
-                                            <h6 class="card-title">Active Licenses</h6>
-                                            <h2 id="stat-licenses">0</h2>
-                                        </div>
-                                        <div><i class="bi bi-key fs-1"></i></div>
+                        
+                        <div class="stat-card success">
+                            <div class="stat-header">
+                                <div>
+                                    <div class="stat-title">Active Licenses</div>
+                                    <div class="stat-value" id="stat-licenses">0</div>
+                                    <div class="stat-change positive">
+                                        <i class="bi bi-arrow-up"></i> All systems go
                                     </div>
+                                </div>
+                                <div class="stat-icon">
+                                    <i class="bi bi-key-fill"></i>
                                 </div>
                             </div>
                         </div>
-                        <div class="col-md-3">
-                            <div class="card text-white bg-info">
-                                <div class="card-body">
-                                    <div class="d-flex justify-content-between">
-                                        <div>
-                                            <h6 class="card-title">Emails Added</h6>
-                                            <h2 id="stat-emails">0</h2>
-                                        </div>
-                                        <div><i class="bi bi-envelope fs-1"></i></div>
+                        
+                        <div class="stat-card info">
+                            <div class="stat-header">
+                                <div>
+                                    <div class="stat-title">Emails Added Today</div>
+                                    <div class="stat-value" id="stat-emails">0</div>
+                                    <div class="stat-change positive">
+                                        <i class="bi bi-arrow-up"></i> Processing...
                                     </div>
+                                </div>
+                                <div class="stat-icon">
+                                    <i class="bi bi-envelope-fill"></i>
                                 </div>
                             </div>
                         </div>
-                        <div class="col-md-3">
-                            <div class="card text-white bg-warning">
-                                <div class="card-body">
-                                    <div class="d-flex justify-content-between">
-                                        <div>
-                                            <h6 class="card-title">Active Clients</h6>
-                                            <h2 id="stat-clients">0</h2>
-                                        </div>
-                                        <div><i class="bi bi-laptop fs-1"></i></div>
+                        
+                        <div class="stat-card warning">
+                            <div class="stat-header">
+                                <div>
+                                    <div class="stat-title">Active Clients</div>
+                                    <div class="stat-value" id="stat-clients">0</div>
+                                    <div class="stat-change positive">
+                                        <i class="bi bi-arrow-up"></i> Online now
                                     </div>
+                                </div>
+                                <div class="stat-icon">
+                                    <i class="bi bi-laptop-fill"></i>
                                 </div>
                             </div>
                         </div>
                     </div>
 
                     <!-- Recent Activity -->
-                    <div class="card">
-                        <div class="card-header">
-                            <h5><i class="bi bi-clock-history"></i> Recent Activity</h5>
+                    <div class="content-card">
+                        <div class="content-card-header">
+                            <h3 class="content-card-title">
+                                <i class="bi bi-clock-history"></i>
+                                <span>Recent Activity</span>
+                            </h3>
+                            <button class="btn btn-sm btn-primary" onclick="loadStats()">
+                                <i class="bi bi-arrow-clockwise"></i> Refresh
+                            </button>
                         </div>
-                        <div class="card-body">
-                            <div id="recent-activity-list">Loading...</div>
+                        <div class="activity-feed" id="recent-activity-list">
+                            <div class="text-center py-4">
+                                <div class="spinner mx-auto mb-3"></div>
+                                <p class="text-muted">Loading activity...</p>
+                            </div>
                         </div>
                     </div>
                 </div>

@@ -39,24 +39,46 @@ class AuthMiddleware {
     
     /**
      * Get current authenticated user
+     * @param bool $required If false, returns null instead of throwing error
      */
-    public static function getAuthUser() {
-        $payload = self::verifyToken();
-        
-        $db = getDB();
-        $stmt = $db->prepare("SELECT id, email, role, is_active FROM users WHERE id = ?");
-        $stmt->execute([$payload->sub]);
-        $user = $stmt->fetch();
-        
-        if (!$user) {
-            errorResponse('User not found', 404);
+    public static function getAuthUser($required = true) {
+        try {
+            $headers = array_change_key_case(getallheaders(), CASE_LOWER);
+            $authHeader = $headers['authorization'] ?? '';
+            
+            if (empty($authHeader)) {
+                if (!$required) return null;
+                errorResponse('Authorization header missing', 401);
+            }
+            
+            if (!preg_match('/Bearer\s+(.*)$/i', $authHeader, $matches)) {
+                if (!$required) return null;
+                errorResponse('Invalid authorization header format', 401);
+            }
+            
+            $token = $matches[1];
+            $decoded = JWT::decode($token, new Key(JWT_SECRET, JWT_ALGORITHM));
+            
+            $db = getDB();
+            $stmt = $db->prepare("SELECT id, email, role, is_active FROM users WHERE id = ?");
+            $stmt->execute([$decoded->sub]);
+            $user = $stmt->fetch();
+            
+            if (!$user) {
+                if (!$required) return null;
+                errorResponse('User not found', 404);
+            }
+            
+            if (!$user['is_active']) {
+                if (!$required) return null;
+                errorResponse('User account is disabled', 403);
+            }
+            
+            return $user;
+        } catch (Exception $e) {
+            if (!$required) return null;
+            errorResponse('Authentication error: ' . $e->getMessage(), 401);
         }
-        
-        if (!$user['is_active']) {
-            errorResponse('User account is disabled', 403);
-        }
-        
-        return $user;
     }
     
     /**

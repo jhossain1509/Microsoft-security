@@ -20,15 +20,45 @@ switch ($method) {
 }
 
 function handleGet() {
-    $user = AuthMiddleware::getAuthUser();
+    // Allow public access to config for initial client setup
+    // Authentication optional for GET (required for POST)
+    try {
+        $user = AuthMiddleware::getAuthUser(false); // false = optional auth
+    } catch (Exception $e) {
+        $user = null;
+    }
     
     $db = getDB();
-    $stmt = $db->query("SELECT setting_key, setting_value FROM settings");
-    $settings = $stmt->fetchAll();
     
-    $config = [];
-    foreach ($settings as $setting) {
-        $config[$setting['setting_key']] = $setting['setting_value'];
+    // Return default config if no settings in database yet
+    try {
+        $stmt = $db->query("SELECT setting_key, setting_value FROM settings");
+        $settings = $stmt->fetchAll();
+        
+        $config = [];
+        foreach ($settings as $setting) {
+            $config[$setting['setting_key']] = $setting['setting_value'];
+        }
+        
+        // Set defaults if empty
+        if (empty($config)) {
+            $config = [
+                'screenshot_interval' => '300',
+                'heartbeat_interval' => '120',
+                'max_activations' => '3',
+                'default_per_account' => '5',
+                'default_batch_size' => '3'
+            ];
+        }
+    } catch (Exception $e) {
+        // Return defaults if table doesn't exist yet
+        $config = [
+            'screenshot_interval' => '300',
+            'heartbeat_interval' => '120',
+            'max_activations' => '3',
+            'default_per_account' => '5',
+            'default_batch_size' => '3'
+        ];
     }
     
     jsonResponse(['success' => true, 'config' => $config]);

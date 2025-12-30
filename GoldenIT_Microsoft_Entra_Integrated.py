@@ -122,55 +122,115 @@ class GoldenITEntraGUI:
             self.machine_id = None
 
         # ----------- UI Layout -----------
-        top = ctk.CTkFrame(self.root, width=930, height=170)
-        top.place(x=20, y=20)
-
-        ctk.CTkLabel(top, text="Accounts File (CSV/TXT):").place(x=18, y=18)
+        # Header Frame with Server Status
+        header = ctk.CTkFrame(self.root, width=930, height=30, fg_color="transparent")
+        header.place(x=20, y=5)
+        
+        if self.server_enabled:
+            self.server_status_lbl = ctk.CTkLabel(header, text="🟢 Server: Connected", font=("Arial", 11, "bold"), text_color="#64e88a")
+            self.server_status_lbl.place(x=0, y=0)
+            user_email = self.auth.get_user_email() if self.auth else "Unknown"
+            self.user_lbl = ctk.CTkLabel(header, text=f"👤 {user_email}", font=("Arial", 11))
+            self.user_lbl.place(x=180, y=0)
+        
+        # Main Control Frame
+        top = ctk.CTkFrame(self.root, width=930, height=180, corner_radius=12)
+        top.place(x=20, y=35)
+        
+        # File Selection Section
+        file_section = ctk.CTkFrame(top, width=900, height=110, fg_color="transparent")
+        file_section.place(x=15, y=10)
+        
+        ctk.CTkLabel(file_section, text="📁 Accounts File:", font=("Arial", 12, "bold")).place(x=0, y=0)
         self.acc_path = tk.StringVar()
-        ctk.CTkEntry(top, textvariable=self.acc_path, width=290).place(x=180, y=18)
-        ctk.CTkButton(top, text="Browse", command=self.browse_acc, width=60).place(x=480, y=17)
+        ctk.CTkEntry(file_section, textvariable=self.acc_path, width=370, height=32).place(x=150, y=0)
+        ctk.CTkButton(file_section, text="Browse", command=self.browse_acc, width=80, height=32, 
+                     fg_color="#667eea", hover_color="#5568d3").place(x=530, y=0)
 
-        ctk.CTkLabel(top, text="Emails File (TXT):").place(x=18, y=60)
+        ctk.CTkLabel(file_section, text="📧 Emails File:", font=("Arial", 12, "bold")).place(x=0, y=45)
         self.eml_path = tk.StringVar()
-        ctk.CTkEntry(top, textvariable=self.eml_path, width=290).place(x=180, y=60)
-        ctk.CTkButton(top, text="Browse", command=self.browse_eml, width=60).place(x=480, y=59)
+        ctk.CTkEntry(file_section, textvariable=self.eml_path, width=370, height=32).place(x=150, y=45)
+        ctk.CTkButton(file_section, text="Browse", command=self.browse_eml, width=80, height=32,
+                     fg_color="#667eea", hover_color="#5568d3").place(x=530, y=45)
 
-        ctk.CTkLabel(top, text="Emails Per Account:").place(x=18, y=105)
-        ctk.CTkEntry(top, textvariable=self.per_account, width=50).place(x=180, y=105)
-        ctk.CTkLabel(top, text="Batch browsers:").place(x=250, y=105)
-        ctk.CTkEntry(top, textvariable=self.batch_size, width=40).place(x=370, y=105)
+        # Settings Row
+        settings_row = ctk.CTkFrame(file_section, width=600, height=40, fg_color="transparent")
+        settings_row.place(x=0, y=85)
+        
+        ctk.CTkLabel(settings_row, text="⚙️ Per Account:", font=("Arial", 11, "bold")).place(x=0, y=0)
+        ctk.CTkEntry(settings_row, textvariable=self.per_account, width=60, height=28).place(x=120, y=0)
+        
+        ctk.CTkLabel(settings_row, text="🌐 Batch Size:", font=("Arial", 11, "bold")).place(x=200, y=0)
+        ctk.CTkEntry(settings_row, textvariable=self.batch_size, width=60, height=28).place(x=300, y=0)
 
-        ctk.CTkButton(top, text="Start", command=self.start, fg_color="#3e9b48", hover_color="#2ca02c", width=90).place(x=600, y=25)
-        ctk.CTkButton(top, text="Pause", command=self.pause, fg_color="#eed202", hover_color="#ffea00", width=90, text_color="#1d2127").place(x=600, y=65)
-        ctk.CTkButton(top, text="Resume", command=self.resume, fg_color="#339af0", hover_color="#1e70bf", width=90).place(x=700, y=65)
-        self.update_resume_btn = ctk.CTkButton(top, text="Update & Resume", command=self.update_and_resume, fg_color="#9b59b6", hover_color="#8e44ad", width=130)
-        self.update_resume_btn.place(x=795, y=65)
+        # Action Buttons Section
+        btn_frame = ctk.CTkFrame(top, width=280, height=160, fg_color="transparent")
+        btn_frame.place(x=635, y=10)
+        
+        # Row 1: Start & Stop
+        ctk.CTkButton(btn_frame, text="▶ Start", command=self.start, 
+                     fg_color="#10b981", hover_color="#059669", width=130, height=36,
+                     font=("Arial", 12, "bold")).place(x=0, y=0)
+        ctk.CTkButton(btn_frame, text="⏹ Stop", command=self.stop, 
+                     fg_color="#ef4444", hover_color="#dc2626", width=130, height=36,
+                     font=("Arial", 12, "bold")).place(x=140, y=0)
+        
+        # Row 2: Pause & Resume
+        ctk.CTkButton(btn_frame, text="⏸ Pause", command=self.pause, 
+                     fg_color="#f59e0b", hover_color="#d97706", width=130, height=36,
+                     font=("Arial", 12, "bold"), text_color="#1f2937").place(x=0, y=45)
+        ctk.CTkButton(btn_frame, text="▶ Resume", command=self.resume, 
+                     fg_color="#3b82f6", hover_color="#2563eb", width=130, height=36,
+                     font=("Arial", 12, "bold")).place(x=140, y=45)
+        
+        # Row 3: Update & Resume (Hidden by default)
+        self.update_resume_btn = ctk.CTkButton(btn_frame, text="🔄 Update & Resume", 
+                                               command=self.update_and_resume, 
+                                               fg_color="#9b59b6", hover_color="#8e44ad", 
+                                               width=270, height=36,
+                                               font=("Arial", 12, "bold"))
+        self.update_resume_btn.place(x=0, y=90)
         self.update_resume_btn.place_forget()  # Hidden by default
-        ctk.CTkButton(top, text="Stop", command=self.stop, fg_color="#e94949", hover_color="#c0392b", width=90).place(x=700, y=25)
-        ctk.CTkButton(top, text="Retry Failed", command=self.retry_failed, fg_color="#d99c29", hover_color="#b78314", width=115).place(x=810, y=25)
-        ctk.CTkButton(top, text="Export Logs", command=self.export_logs, fg_color="#8f67c7", hover_color="#6c47a8", width=115).place(x=810, y=65)
+        
+        # Row 4: Utility Buttons
+        ctk.CTkButton(btn_frame, text="🔁 Retry Failed", command=self.retry_failed, 
+                     fg_color="#f97316", hover_color="#ea580c", width=130, height=36,
+                     font=("Arial", 11, "bold")).place(x=0, y=90)
+        ctk.CTkButton(btn_frame, text="📊 Export", command=self.export_logs, 
+                     fg_color="#8b5cf6", hover_color="#7c3aed", width=130, height=36,
+                     font=("Arial", 11, "bold")).place(x=140, y=90)
 
-        self.pbar = ctk.CTkProgressBar(self.root, width=780, height=16, corner_radius=8)
-        self.pbar.place(x=80, y=200)
+        # Progress Bar
+        progress_frame = ctk.CTkFrame(self.root, width=930, height=50, corner_radius=10)
+        progress_frame.place(x=20, y=225)
+        
+        self.pbar = ctk.CTkProgressBar(progress_frame, width=800, height=20, corner_radius=10,
+                                      progress_color="#667eea")
+        self.pbar.place(x=15, y=15)
         self.pbar.set(0.0)
-        self.pbar_label = ctk.CTkLabel(self.root, text="Progress: 0%")
-        self.pbar_label.place(x=870, y=200)
-        self.summary_lbl = ctk.CTkLabel(self.root, text="", font=("Consolas", 13))
-        self.summary_lbl.place(x=20, y=230)
-        self.log = tk.Text(self.root, width=120, height=24, bg="#191e2b", fg="#e5eaff", insertbackground="#eee", font=("Consolas", 10))
-        self.log.place(x=20, y=270)
+        self.pbar_label = ctk.CTkLabel(progress_frame, text="Progress: 0%", font=("Arial", 12, "bold"))
+        self.pbar_label.place(x=825, y=15)
+        
+        # Summary Label
+        self.summary_lbl = ctk.CTkLabel(self.root, text="", font=("Arial", 12, "bold"),
+                                       text_color="#667eea")
+        self.summary_lbl.place(x=20, y=285)
+        
+        # Log Console
+        log_frame = ctk.CTkFrame(self.root, width=930, height=380, corner_radius=10)
+        log_frame.place(x=20, y=315)
+        
+        log_header = ctk.CTkLabel(log_frame, text="📋 Activity Log", font=("Arial", 13, "bold"))
+        log_header.place(x=15, y=10)
+        
+        self.log = tk.Text(log_frame, width=118, height=20, bg="#1a1f36", fg="#e5eaff", 
+                          insertbackground="#eee", font=("Consolas", 10), relief="flat",
+                          padx=10, pady=10)
+        self.log.place(x=15, y=40)
         self.log.tag_config("INFO", foreground="#60b8ff")
         self.log.tag_config("SUCCESS", foreground="#64e88a")
         self.log.tag_config("WARN", foreground="#f5e662")
         self.log.tag_config("ERROR", foreground="#ff6666")
-        
-        # Server status indicator
-        if self.server_enabled:
-            self.server_status_lbl = ctk.CTkLabel(self.root, text="🟢 Server: Connected", font=("Arial", 10), text_color="#64e88a")
-            self.server_status_lbl.place(x=20, y=5)
-            user_email = self.auth.get_user_email() if self.auth else "Unknown"
-            self.user_lbl = ctk.CTkLabel(self.root, text=f"User: {user_email}", font=("Arial", 10))
-            self.user_lbl.place(x=180, y=5)
 
         self.root.after(500, self.poll_log)
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
