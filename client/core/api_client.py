@@ -37,15 +37,43 @@ class APIClient:
         try:
             response = requests.request(method, url, **kwargs, timeout=30)
             
+            # Debug: Print response details
+            print(f"API Request: {method} {url}")
+            print(f"Status Code: {response.status_code}")
+            
             # If 401, try to refresh token
             if response.status_code == 401 and self.refresh_token:
                 if self._refresh_access_token():
                     kwargs['headers'] = self._get_headers()
                     response = requests.request(method, url, **kwargs, timeout=30)
             
-            return response.json() if response.ok else None
+            # Check if response has content before parsing JSON
+            if not response.ok:
+                print(f"API Error: {response.status_code} - {response.text[:200]}")
+                return None
+            
+            # Try to parse JSON with better error handling
+            try:
+                if response.text.strip():
+                    return response.json()
+                else:
+                    print("Warning: Empty response from server")
+                    return None
+            except ValueError as json_err:
+                print(f"JSON Parse Error: {json_err}")
+                print(f"Response content: {response.text[:500]}")
+                return None
+                
+        except requests.exceptions.ConnectionError as e:
+            print(f"Connection Error: Cannot reach server at {url}")
+            print(f"Details: {e}")
+            return None
+        except requests.exceptions.Timeout as e:
+            print(f"Timeout Error: Server took too long to respond")
+            print(f"Details: {e}")
+            return None
         except Exception as e:
-            print(f"API Request Error: {e}")
+            print(f"API Request Error: {type(e).__name__}: {e}")
             return None
     
     def _refresh_access_token(self) -> bool:

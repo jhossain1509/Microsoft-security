@@ -2,6 +2,19 @@
 
 PHP-based REST API for GoldenIT Microsoft Entra desktop application.
 
+## ⚡ Quick Test
+
+After uploading files, test your setup:
+1. Visit: `https://your-domain.com/Microsoft-Entra/test.php`
+2. This will check all requirements
+3. Delete `test.php` after verification (security)
+
+## 🆘 Having Issues?
+
+See **[TROUBLESHOOTING.md](../TROUBLESHOOTING.md)** for common problems and solutions.
+
+---
+
 ## Installation on cPanel
 
 ### 1. Database Setup
@@ -23,15 +36,29 @@ PHP-based REST API for GoldenIT Microsoft Entra desktop application.
 
 ### 3. Install PHP Dependencies
 
-Since you don't have SSH access, download the vendor folder with firebase/php-jwt:
+✅ **Good News: PHP-JWT is now included!**
 
-**Option A: Download pre-packaged vendor folder**
-1. Download from: [Firebase PHP-JWT Releases](https://github.com/firebase/php-jwt/releases)
-2. Extract to `cpanel-backend/vendor/`
+The `vendor/` folder with Firebase PHP-JWT library is **already included** in the repository.
 
-**Option B: Local composer install and upload**
+**Just upload it:**
+1. Upload the entire `cpanel-backend/vendor/` folder from repository
+2. Upload to: `public_html/Microsoft-Entra/vendor/`
+3. Verify these files exist on server:
+   - `vendor/autoload.php`
+   - `vendor/firebase/php-jwt/src/JWT.php`
+
+**Alternative: Download Separately** (if vendor folder is missing)
+
+**Option A: Download from GitHub**
+1. Go to: [Firebase PHP-JWT Releases](https://github.com/firebase/php-jwt/releases)
+2. Download latest version (e.g., v6.10.0)
+3. Extract and upload `src/` folder to `vendor/firebase/php-jwt/src/`
+4. Upload the autoload.php from repository
+
+**Option B: Use Composer locally**
 ```bash
 # On your local machine with composer:
+cd cpanel-backend
 composer install
 # Then upload the entire vendor/ folder via FTP
 ```
