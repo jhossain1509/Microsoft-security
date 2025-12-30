@@ -321,4 +321,8 @@ def export_csv():
     }
 
 if __name__ == '__main__':
-    app.run(host=SERVER_HOST, port=SERVER_PORT, debug=True)
+    # Only enable debug in development
+    debug_mode = os.environ.get('FLASK_DEBUG', 'False').lower() == 'true'
+    if debug_mode:
+        print("WARNING: Running in DEBUG mode. Do NOT use in production!")
+    app.run(host=SERVER_HOST, port=SERVER_PORT, debug=debug_mode)
