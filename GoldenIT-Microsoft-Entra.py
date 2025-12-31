@@ -123,6 +123,15 @@ class GoldenITEntraGUI:
         self.pc_name = platform.node()
         self.is_licensed = False  # MANDATORY: License required to run
         
+        # API Mode (Feature 2 & 5)
+        self.api_mode_enabled = False
+        self.api_settings = {}
+        
+        # Heartbeat (Feature 4)
+        self.heartbeat_thread = None
+        self.heartbeat_running = False
+        self.server_pause_flag = False
+        
         # Data
         self.accounts = []
         self.original_accounts = []  # For looping
@@ -369,6 +378,128 @@ class GoldenITEntraGUI:
         except Exception as e:
             print(f"Failed to log activity to server: {e}")
 
+    # ===== FEATURE 4: Auto Pause/Resume with Heartbeat =====
+    
+    def start_heartbeat(self):
+        """Start heartbeat system (Feature 4)"""
+        if not self.heartbeat_running and WEB_AVAILABLE and self.is_licensed:
+            self.heartbeat_running = True
+            self.heartbeat_thread = threading.Thread(target=self.heartbeat_worker, daemon=True)
+            self.heartbeat_thread.start()
+            self.logit("💓 Heartbeat system started", "INFO")
+    
+    def stop_heartbeat(self):
+        """Stop heartbeat system"""
+        self.heartbeat_running = False
+    
+    def heartbeat_worker(self):
+        """Send heartbeat every 60 seconds and check for server pause flag"""
+        while self.heartbeat_running:
+            try:
+                time.sleep(60)  # Heartbeat every minute
+                
+                if not self.is_licensed or not self.user_id:
+                    continue
+                
+                # Get current account being processed
+                current_acc = ""
+                if hasattr(self, 'current_processing_account'):
+                    current_acc = self.current_processing_account
+                
+                # Send heartbeat
+                response = requests.post(
+                    f'http://localhost:{SERVER_PORT}/api/pc/heartbeat',
+                    json={
+                        'user_id': self.user_id,
+                        'pc_id': self.pc_id,
+                        'pc_name': self.pc_name,
+                        'current_account': current_acc
+                    },
+                    timeout=5
+                )
+                
+                if response.ok:
+                    data = response.json()
+                    should_pause = data.get('should_pause', False)
+                    
+                    # Auto-pause if server requests it
+                    if should_pause and not self.pause_flag.is_set():
+                        self.logit("⚠️ Server requested pause - auto-pausing", "WARNING")
+                        self.pause_flag.set()
+                        self.server_pause_flag = True
+                    elif not should_pause and self.server_pause_flag:
+                        # Server removed pause flag
+                        self.logit("✅ Server pause cleared - resuming", "INFO")
+                        self.pause_flag.clear()
+                        self.server_pause_flag = False
+                        
+            except requests.exceptions.ConnectionError:
+                # Connection lost - auto pause
+                if not self.pause_flag.is_set():
+                    self.logit("❌ Server connection lost - auto-pausing", "ERROR")
+                    self.pause_flag.set()
+                    self.server_pause_flag = True
+            except Exception as e:
+                print(f"Heartbeat error: {e}")
+    
+    # ===== FEATURE 2 & 5: API Mode - Fetch accounts and emails from server =====
+    
+    def fetch_work_from_api(self):
+        """Fetch accounts and emails from API (Feature 2 & 5)"""
+        if not WEB_AVAILABLE or not self.is_licensed:
+            return False
+        
+        try:
+            response = requests.post(
+                f'http://localhost:{SERVER_PORT}/api/desktop/get-work',
+                json={
+                    'user_id': self.user_id,
+                    'pc_id': self.pc_id
+                },
+                timeout=10
+            )
+            
+            if not response.ok:
+                return False
+            
+            data = response.json()
+            
+            if not data.get('api_mode'):
+                return False
+            
+            # Store API settings
+            self.api_settings = data.get('settings', {})
+            self.api_mode_enabled = True
+            
+            # Load accounts from API
+            api_accounts = data.get('accounts', [])
+            if api_accounts:
+                self.accounts = []
+                for acc_data in api_accounts:
+                    self.accounts.append(Account(
+                        email=acc_data.get('email', ''),
+                        password=acc_data.get('password', ''),
+                        secret=acc_data.get('twofa_secret', '')
+                    ))
+                self.original_accounts = self.accounts.copy()
+            
+            # Load emails from API
+            api_emails = data.get('emails', [])
+            if api_emails:
+                self.emails = [e.get('email', '') for e in api_emails if not e.get('is_processed')]
+                self.original_emails = self.emails.copy()
+            
+            # Update settings from API
+            if self.api_settings:
+                self.per_account.set(self.api_settings.get('emails_per_account', 10))
+                self.batch_size.set(self.api_settings.get('max_browsers', 3))
+            
+            return len(self.accounts) > 0 and len(self.emails) > 0
+            
+        except Exception as e:
+            self.logit(f"❌ Failed to fetch work from API: {e}", "ERROR")
+            return False
+
     def start_screenshot_capture(self):
         """Start periodic screenshot capture"""
         if not self.screenshot_running and TRAY_AVAILABLE:
@@ -606,6 +737,9 @@ class GoldenITEntraGUI:
             try: asyncio.run_coroutine_threadsafe(b.close(), self.async_loop)
             except: pass
         self.update_resume_btn.configure(state="disabled")
+        
+        # Stop heartbeat system
+        self.stop_heartbeat()
 
     # ------ Main Start ------
     def start(self):
@@ -619,37 +753,60 @@ class GoldenITEntraGUI:
             self.show_license_dialog()
             return
         
-        if not self.acc_path.get() or not self.eml_path.get():
-            messagebox.showerror("Missing file", "Please select both accounts and email list files.")
-            return
-        accs = []
-        with open(self.acc_path.get(), newline="", encoding="utf-8") as f:
-            r = csv.DictReader(f) if self.acc_path.get().endswith(".csv") else (dict(zip(["email", "password", "secret"], l.strip().split(",", 2))) for l in f if l.strip())
-            for row in r:
-                e = row.get("email") or row.get("username") or row.get("upn")
-                p = row.get("password") or row.get("pass")
-                s = row.get("2fa_secret") or row.get("secret", "")
-                if e and p:
-                    accs.append(Account(email=e.strip(), password=p.strip(), secret=s.strip()))
-        with open(self.eml_path.get(), encoding="utf-8") as f:
-            eml = [l.strip() for l in f if "@" in l]
-        if not accs or not eml:
-            messagebox.showerror("Error", "Accounts or Emails file is empty or invalid.")
+        # FEATURE 5: Dual Mode - Try API first, then fall back to manual files
+        api_success = False
+        if WEB_AVAILABLE:
+            self.logit("🔍 Checking API mode...", "INFO")
+            api_success = self.fetch_work_from_api()
+            
+            if api_success:
+                self.logit("✅ API Mode: Loaded data from web panel", "SUCCESS")
+            else:
+                self.logit("ℹ️ API Mode disabled or no data - using manual files", "INFO")
+        
+        # Manual File Mode (fallback or primary if API not used)
+        if not api_success:
+            if not self.acc_path.get() or not self.eml_path.get():
+                messagebox.showerror("Missing file", "Please select both accounts and email list files OR enable API mode in web panel.")
+                return
+            accs = []
+            with open(self.acc_path.get(), newline="", encoding="utf-8") as f:
+                r = csv.DictReader(f) if self.acc_path.get().endswith(".csv") else (dict(zip(["email", "password", "secret"], l.strip().split(",", 2))) for l in f if l.strip())
+                for row in r:
+                    e = row.get("email") or row.get("username") or row.get("upn")
+                    p = row.get("password") or row.get("pass")
+                    s = row.get("2fa_secret") or row.get("secret", "")
+                    # FEATURE 9: Proxy support - read from CSV
+                    proxy = row.get("proxy", "")
+                    if e and p:
+                        accs.append(Account(email=e.strip(), password=p.strip(), secret=s.strip()))
+            with open(self.eml_path.get(), encoding="utf-8") as f:
+                eml = [l.strip() for l in f if "@" in l]
+            if not accs or not eml:
+                messagebox.showerror("Error", "Accounts or Emails file is empty or invalid.")
+                return
+            
+            self.accounts = accs
+            self.original_accounts = accs.copy()
+            self.emails = eml
+            self.original_emails = eml.copy()
+            self.current_account_index = 0
+        
+        # Validate we have data
+        if not self.accounts or not self.emails:
+            messagebox.showerror("Error", "No accounts or emails available.")
             return
         
-        self.accounts = accs
-        self.original_accounts = accs.copy()
-        self.emails = eml
-        self.original_emails = eml.copy()
-        self.current_account_index = 0
-        
-        self.summary = {"Total": len(accs), "Processed": 0, "Success": 0, "Fail": 0, "Skipped": 0}
+        self.summary = {"Total": len(self.accounts), "Processed": 0, "Success": 0, "Fail": 0, "Skipped": 0}
         self.update_summary()
         self.clear_log()
         self.pause_flag.clear()
         self.stop_flag.clear()
-        self.logit(f"🚀 Loaded {len(accs)} accounts, {len(eml)} emails.", "INFO")
+        self.logit(f"🚀 Loaded {len(self.accounts)} accounts, {len(self.emails)} emails.", "INFO")
         self.logit(f"📧 Will loop accounts until all emails are processed.", "INFO")
+        
+        # FEATURE 4: Start heartbeat system
+        self.start_heartbeat()
         
         threading.Thread(target=self.runner, daemon=True).start()
 
