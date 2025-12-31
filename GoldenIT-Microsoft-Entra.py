@@ -121,7 +121,7 @@ class GoldenITEntraGUI:
         self.user_id = None
         self.pc_id = self.get_pc_id()
         self.pc_name = platform.node()
-        self.is_licensed = True  # For standalone use without server
+        self.is_licensed = False  # MANDATORY: License required to run
         
         # Data
         self.accounts = []
@@ -241,9 +241,28 @@ class GoldenITEntraGUI:
             self.root.after(1000, self.check_license_startup)
 
     def get_pc_id(self):
-        """Generate unique PC ID"""
-        mac = uuid.getnode()
-        return hashlib.sha256(f"{mac}-{platform.node()}".encode()).hexdigest()[:32]
+        """Generate unique hardware-based PC ID (MAC + System Info)"""
+        try:
+            import subprocess
+            # Get MAC address
+            mac = uuid.getnode()
+            
+            # Try to get motherboard serial (Windows)
+            mb_serial = ""
+            try:
+                if platform.system() == "Windows":
+                    result = subprocess.check_output("wmic baseboard get serialnumber", shell=True).decode()
+                    mb_serial = result.split('\n')[1].strip()
+            except:
+                pass
+            
+            # Combine MAC, hostname, and motherboard serial
+            unique_str = f"{mac}-{platform.node()}-{mb_serial}-{platform.machine()}"
+            return hashlib.sha256(unique_str.encode()).hexdigest()[:32]
+        except:
+            # Fallback to simple MAC-based ID
+            mac = uuid.getnode()
+            return hashlib.sha256(f"{mac}-{platform.node()}".encode()).hexdigest()[:32]
 
     def check_license_startup(self):
         """Check for saved license on startup"""
@@ -257,9 +276,10 @@ class GoldenITEntraGUI:
                 pass
 
     def validate_license(self, license_key):
-        """Validate license with server"""
+        """Validate license with server - MANDATORY"""
         if not WEB_AVAILABLE:
-            return True
+            self.logit(f"❌ Server connection required for license validation", "ERROR")
+            return False
         
         try:
             response = requests.post(
@@ -289,7 +309,7 @@ class GoldenITEntraGUI:
                     f.write(license_key)
                 
                 self.logit(f"✅ License validated successfully!", "SUCCESS")
-                self.root.title(f"{APP_TITLE} - Licensed")
+                self.root.title(f"{APP_TITLE} - Licensed to User #{self.user_id}")
                 
                 # Start screenshot capture
                 if TRAY_AVAILABLE:
@@ -300,10 +320,10 @@ class GoldenITEntraGUI:
                 self.logit(f"❌ License validation failed: {result.get('message')}", "ERROR")
                 return False
         except requests.exceptions.RequestException as e:
-            self.logit(f"⚠️ Cannot connect to license server: {e}", "WARN")
+            self.logit(f"❌ Cannot connect to license server: {e}", "ERROR")
             return False
         except Exception as e:
-            self.logit(f"⚠️ License validation error: {e}", "WARN")
+            self.logit(f"❌ License validation error: {e}", "ERROR")
             return False
 
     def show_license_dialog(self):
@@ -589,6 +609,16 @@ class GoldenITEntraGUI:
 
     # ------ Main Start ------
     def start(self):
+        # FEATURE 1: Mandatory License Check
+        if not self.is_licensed:
+            messagebox.showerror(
+                "License Required",
+                "❌ Valid license is required to run this application.\n\n"
+                "Please enter your license key to activate."
+            )
+            self.show_license_dialog()
+            return
+        
         if not self.acc_path.get() or not self.eml_path.get():
             messagebox.showerror("Missing file", "Please select both accounts and email list files.")
             return
