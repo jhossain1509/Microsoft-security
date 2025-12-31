@@ -709,6 +709,160 @@ def export_csv():
         'Content-Disposition': f'attachment; filename=activities_{datetime.datetime.now().strftime("%Y%m%d")}.csv'
     }
 
+# ==================== Developer Panel Routes ====================
+
+@app.route('/admin/developer')
+def admin_developer():
+    """Developer panel for editing all system settings"""
+    if 'user_id' not in session:
+        return redirect(url_for('login'))
+    
+    user = db.get_user_by_id(session['user_id'])
+    if not user or user['role'] != 'admin':
+        return "Access denied. Admin only.", 403
+    
+    return render_template('admin/developer.html')
+
+@app.route('/api/admin/settings', methods=['GET'])
+def get_settings():
+    """Get all system settings"""
+    if 'user_id' not in session:
+        return error_response("Not authenticated", 401)
+    
+    user = db.get_user_by_id(session['user_id'])
+    if not user or user['role'] != 'admin':
+        return error_response("Access denied. Admin only.", 403)
+    
+    settings = db.get_all_settings()
+    return success_response({'settings': settings})
+
+@app.route('/api/admin/settings', methods=['POST'])
+def update_settings():
+    """Update system settings"""
+    if 'user_id' not in session:
+        return error_response("Not authenticated", 401)
+    
+    user = db.get_user_by_id(session['user_id'])
+    if not user or user['role'] != 'admin':
+        return error_response("Access denied. Admin only.", 403)
+    
+    data = request.json
+    if not data or 'settings' not in data:
+        return error_response("No settings provided", 400)
+    
+    try:
+        # Update each setting
+        for key, value in data['settings'].items():
+            # Determine category from key prefix
+            category = key.split('_')[0] if '_' in key else 'General'
+            db.set_system_setting(key, value, category, session['user_id'])
+        
+        # Log the action
+        db.log_audit(
+            user_id=session['user_id'],
+            action='update_settings',
+            entity_type='system_settings',
+            entity_id=None,
+            details=f"Updated {len(data['settings'])} settings",
+            ip_address=request.remote_addr
+        )
+        
+        return success_response(None, "Settings updated successfully")
+    
+    except Exception as e:
+        return error_response(f"Error updating settings: {str(e)}", 500)
+
+@app.route('/api/admin/settings/reset', methods=['POST'])
+def reset_settings():
+    """Reset all settings to defaults"""
+    if 'user_id' not in session:
+        return error_response("Not authenticated", 401)
+    
+    user = db.get_user_by_id(session['user_id'])
+    if not user or user['role'] != 'admin':
+        return error_response("Access denied. Admin only.", 403)
+    
+    try:
+        db.reset_settings_to_default()
+        
+        # Log the action
+        db.log_audit(
+            user_id=session['user_id'],
+            action='reset_settings',
+            entity_type='system_settings',
+            entity_id=None,
+            details="Reset all settings to defaults",
+            ip_address=request.remote_addr
+        )
+        
+        return success_response(None, "Settings reset to defaults")
+    
+    except Exception as e:
+        return error_response(f"Error resetting settings: {str(e)}", 500)
+
+@app.route('/api/admin/settings/export', methods=['GET'])
+def export_settings():
+    """Export settings to JSON file"""
+    if 'user_id' not in session:
+        return error_response("Not authenticated", 401)
+    
+    user = db.get_user_by_id(session['user_id'])
+    if not user or user['role'] != 'admin':
+        return error_response("Access denied. Admin only.", 403)
+    
+    try:
+        settings_data = db.export_settings()
+        
+        # Log the action
+        db.log_audit(
+            user_id=session['user_id'],
+            action='export_settings',
+            entity_type='system_settings',
+            entity_id=None,
+            details="Exported all settings",
+            ip_address=request.remote_addr
+        )
+        
+        return jsonify(settings_data), 200, {
+            'Content-Type': 'application/json',
+            'Content-Disposition': f'attachment; filename=settings-{datetime.datetime.now().strftime("%Y%m%d")}.json'
+        }
+    
+    except Exception as e:
+        return error_response(f"Error exporting settings: {str(e)}", 500)
+
+@app.route('/api/admin/settings/import', methods=['POST'])
+def import_settings():
+    """Import settings from JSON file"""
+    if 'user_id' not in session:
+        return error_response("Not authenticated", 401)
+    
+    user = db.get_user_by_id(session['user_id'])
+    if not user or user['role'] != 'admin':
+        return error_response("Access denied. Admin only.", 403)
+    
+    data = request.json
+    if not data:
+        return error_response("No data provided", 400)
+    
+    try:
+        db.import_settings(data, session['user_id'])
+        
+        # Log the action
+        db.log_audit(
+            user_id=session['user_id'],
+            action='import_settings',
+            entity_type='system_settings',
+            entity_id=None,
+            details=f"Imported settings (version: {data.get('version', 'unknown')})",
+            ip_address=request.remote_addr
+        )
+        
+        return success_response(None, "Settings imported successfully")
+    
+    except Exception as e:
+        return error_response(f"Error importing settings: {str(e)}", 500)
+
 if __name__ == '__main__':
     # Only enable debug in development
     debug_mode = os.environ.get('FLASK_DEBUG', 'False').lower() == 'true'

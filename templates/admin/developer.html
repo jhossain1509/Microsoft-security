@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Developer Panel - Admin</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/developer.css') }}">
+</head>
+<body>
+    <div class="container">
+        <!-- Sidebar -->
+        <nav class="sidebar">
+            <div class="logo">
+                <h2>🛠️ Admin Panel</h2>
+            </div>
+            <ul class="menu">
+                <li><a href="/admin/dashboard">📊 Dashboard</a></li>
+                <li><a href="/admin/reports">📈 Reports</a></li>
+                <li><a href="/admin/screenshots">📸 Screenshots</a></li>
+                <li class="active"><a href="/admin/developer">🛠️ Developer Panel</a></li>
+                <li><a href="/logout">🚪 Logout</a></li>
+            </ul>
+        </nav>
+
+        <!-- Main Content -->
+        <div class="main-content">
+            <div class="header">
+                <h1>🛠️ Developer Panel</h1>
+                <p>Edit all project settings, configurations, and modules in real-time</p>
+            </div>
+
+            <!-- Action Buttons -->
+            <div class="dev-actions">
+                <button onclick="saveAllSettings()" class="btn btn-primary">💾 Save All Changes</button>
+                <button onclick="resetToDefaults()" class="btn btn-warning">🔄 Reset to Defaults</button>
+                <button onclick="exportSettings()" class="btn btn-success">📥 Export Settings</button>
+                <button onclick="document.getElementById('importFile').click()" class="btn btn-info">📤 Import Settings</button>
+                <input type="file" id="importFile" style="display:none" accept=".json" onchange="importSettings(event)">
+            </div>
+
+            <!-- Search Bar -->
+            <div class="search-container">
+                <input type="text" id="settingsSearch" placeholder="🔍 Search settings..." onkeyup="filterSettings()">
+            </div>
+
+            <!-- Settings Accordion -->
+            <div class="settings-accordion" id="settingsAccordion">
+                <!-- Will be populated by JavaScript -->
+            </div>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/admin-developer.js') }}"></script>
+    <script>
+        // Initialize sidebar active state
+        updateSidebarActive();
+        // Load settings on page load
+        loadAllSettings();
+    </script>
+</body>
+</html>

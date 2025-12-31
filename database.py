@@ -1042,6 +1042,166 @@ class Database:
         logs = [dict(row) for row in cursor.fetchall()]
         conn.close()
         return logs
+    
+    # ==================== System Settings Methods ====================
+    
+    def create_system_settings_table(self):
+        """Create system settings table for Developer Panel"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS system_settings (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                setting_key TEXT UNIQUE NOT NULL,
+                setting_value TEXT,
+                category TEXT,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_by INTEGER,
+                FOREIGN KEY (updated_by) REFERENCES users (id)
+            )
+        ''')
+        
+        conn.commit()
+        conn.close()
+    
+    def get_system_setting(self, key: str, default=None):
+        """Get a system setting value"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('SELECT setting_value FROM system_settings WHERE setting_key = ?', (key,))
+        row = cursor.fetchone()
+        conn.close()
+        
+        if row:
+            return row['setting_value']
+        return default
+    
+    def set_system_setting(self, key: str, value, category: str = None, user_id: int = None):
+        """Set or update a system setting"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        # Convert value to string for storage
+        str_value = str(value) if value is not None else None
+        
+        cursor.execute('''
+            INSERT INTO system_settings (setting_key, setting_value, category, updated_by, updated_at)
+            VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(setting_key) DO UPDATE SET
+                setting_value = excluded.setting_value,
+                category = COALESCE(excluded.category, category),
+                updated_by = excluded.updated_by,
+                updated_at = CURRENT_TIMESTAMP
+        ''', (key, str_value, category, user_id))
+        
+        conn.commit()
+        conn.close()
+    
+    def get_all_settings(self) -> Dict[str, any]:
+        """Get all system settings as a dictionary"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('SELECT setting_key, setting_value FROM system_settings')
+        rows = cursor.fetchall()
+        conn.close()
+        
+        settings = {}
+        for row in rows:
+            key = row['setting_key']
+            value = row['setting_value']
+            
+            # Try to convert to appropriate type
+            if value is None:
+                settings[key] = None
+            elif value.lower() in ('true', 'false'):
+                settings[key] = value.lower() == 'true'
+            elif value.isdigit():
+                settings[key] = int(value)
+            else:
+                try:
+                    settings[key] = float(value)
+                except ValueError:
+                    settings[key] = value
+        
+        return settings
+    
+    def get_settings_by_category(self, category: str) -> Dict[str, any]:
+        """Get settings for a specific category"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('SELECT setting_key, setting_value FROM system_settings WHERE category = ?', (category,))
+        rows = cursor.fetchall()
+        conn.close()
+        
+        settings = {}
+        for row in rows:
+            settings[row['setting_key']] = row['setting_value']
+        
+        return settings
+    
+    def reset_settings_to_default(self):
+        """Reset all settings to default (delete all)"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('DELETE FROM system_settings')
+        
+        conn.commit()
+        conn.close()
+    
+    def export_settings(self) -> Dict[str, any]:
+        """Export all settings for backup"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('SELECT setting_key, setting_value, category FROM system_settings')
+        rows = cursor.fetchall()
+        conn.close()
+        
+        export_data = {
+            'version': '1.0',
+            'exported_at': datetime.datetime.now().isoformat(),
+            'settings': {}
+        }
+        
+        for row in rows:
+            export_data['settings'][row['setting_key']] = {
+                'value': row['setting_value'],
+                'category': row['category']
+            }
+        
+        return export_data
+    
+    def import_settings(self, data: Dict[str, any], user_id: int = None):
+        """Import settings from backup"""
+        if 'settings' not in data:
+            raise ValueError('Invalid settings data format')
+        
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        for key, setting_data in data['settings'].items():
+            value = setting_data.get('value')
+            category = setting_data.get('category')
+            
+            cursor.execute('''
+                INSERT INTO system_settings (setting_key, setting_value, category, updated_by, updated_at)
+                VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(setting_key) DO UPDATE SET
+                    setting_value = excluded.setting_value,
+                    category = excluded.category,
+                    updated_by = excluded.updated_by,
+                    updated_at = CURRENT_TIMESTAMP
+            ''', (key, value, category, user_id))
+        
+        conn.commit()
+        conn.close()
 
 # Initialize database
 db = Database()
+# Ensure system settings table exists
+db.create_system_settings_table()
