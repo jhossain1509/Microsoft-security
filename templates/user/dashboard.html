@@ -111,17 +111,6 @@
                 </div>
             </div>
 
-            <!-- Screenshots -->
-            <div class="content-section">
-                <div class="section-header">
-                    <h3>Recent Screenshots</h3>
-                    <button class="btn btn-secondary" onclick="refreshScreenshots()">🔄 Refresh</button>
-                </div>
-                <div id="screenshotsGrid" class="screenshots-grid">
-                    <!-- Populated by JavaScript -->
-                </div>
-            </div>
-
             <!-- Recent Activities -->
             <div class="content-section">
                 <h3>Recent Activities</h3>
@@ -142,19 +131,6 @@
                 </div>
             </div>
         </main>
-    </div>
-
-    <!-- Screenshot Modal -->
-    <div id="screenshotModal" class="modal" style="display: none;">
-        <div class="modal-content modal-large">
-            <div class="modal-header">
-                <h3>Screenshot Preview</h3>
-                <span class="close" onclick="closeModal('screenshotModal')">&times;</span>
-            </div>
-            <div class="modal-body">
-                <img id="screenshotPreview" src="" style="max-width: 100%;">
-            </div>
-        </div>
     </div>
 
     <script src="{{ url_for('static', filename='js/user.js') }}"></script>

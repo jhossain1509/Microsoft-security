@@ -4,7 +4,6 @@ let activityChart;
 
 document.addEventListener('DOMContentLoaded', () => {
     loadUserActivities();
-    loadScreenshots();
     loadStats();
 });
 
@@ -41,42 +40,6 @@ function renderActivitiesTable(activities) {
             </td>
         </tr>
     `).join('');
-}
-
-async function loadScreenshots() {
-    try {
-        const response = await fetch('/api/user/screenshots');
-        const screenshots = await response.json();
-        renderScreenshots(screenshots);
-    } catch (error) {
-        console.error('Error loading screenshots:', error);
-    }
-}
-
-function renderScreenshots(screenshots) {
-    const grid = document.getElementById('screenshotsGrid');
-    if (!screenshots || screenshots.length === 0) {
-        grid.innerHTML = '<p style="color: #95a5a6;">No screenshots yet</p>';
-        return;
-    }
-
-    grid.innerHTML = screenshots.map(shot => `
-        <div class="screenshot-item" onclick="showScreenshot('${shot.filename}')">
-            <img src="/api/screenshot/${shot.thumbnail_filename || shot.filename}" alt="Screenshot">
-            <div class="screenshot-overlay">
-                ${formatDate(shot.created_at)}
-            </div>
-        </div>
-    `).join('');
-}
-
-function showScreenshot(filename) {
-    document.getElementById('screenshotPreview').src = '/api/screenshot/' + filename;
-    document.getElementById('screenshotModal').style.display = 'block';
-}
-
-function closeModal(modalId) {
-    document.getElementById(modalId).style.display = 'none';
 }
 
 async function loadStats() {
@@ -139,10 +102,6 @@ function renderActivityChart(dailyStats) {
     });
 }
 
-async function refreshScreenshots() {
-    loadScreenshots();
-}
-
 async function exportMyData() {
     window.location.href = '/api/export/csv';
 }
@@ -151,11 +110,4 @@ function formatDate(dateString) {
     if (!dateString) return 'N/A';
     const date = new Date(dateString);
     return date.toLocaleDateString() + ' ' + date.toLocaleTimeString();
-}
-
-// Close modal when clicking outside
-window.onclick = function(event) {
-    if (event.target.classList.contains('modal')) {
-        event.target.style.display = 'none';
-    }
 }
