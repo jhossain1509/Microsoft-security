@@ -107,6 +107,63 @@ class Database:
             )
         ''')
         
+        # FEATURE 2: User Accounts Pool (for API mode)
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS user_accounts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                email TEXT NOT NULL,
+                password TEXT NOT NULL,
+                twofa_secret TEXT,
+                proxy TEXT,
+                is_active INTEGER DEFAULT 1,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                last_used TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users (id)
+            )
+        ''')
+        
+        # FEATURE 2: User Email Lists (for API mode)
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS user_emails (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                email TEXT NOT NULL,
+                is_processed INTEGER DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                processed_at TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users (id)
+            )
+        ''')
+        
+        # FEATURE 2: User Settings
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS user_settings (
+                user_id INTEGER PRIMARY KEY,
+                emails_per_account INTEGER DEFAULT 10,
+                interval_minutes INTEGER DEFAULT 10,
+                max_browsers INTEGER DEFAULT 3,
+                use_api_mode INTEGER DEFAULT 1,
+                FOREIGN KEY (user_id) REFERENCES users (id)
+            )
+        ''')
+        
+        # FEATURE 4 & 6: PC Status (for monitoring and auto-pause)
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS pc_status (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                pc_id TEXT NOT NULL,
+                pc_name TEXT,
+                status TEXT DEFAULT 'offline',
+                current_account TEXT,
+                last_heartbeat TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                paused_by_server INTEGER DEFAULT 0,
+                FOREIGN KEY (user_id) REFERENCES users (id),
+                UNIQUE(user_id, pc_id)
+            )
+        ''')
+        
         # Create default admin user if not exists
         cursor.execute("SELECT COUNT(*) as count FROM users WHERE username='admin'")
         if cursor.fetchone()['count'] == 0:
@@ -472,6 +529,190 @@ class Database:
         conn.commit()
         conn.close()
         return True
+    
+    # ===== FEATURE 2: User Accounts & Emails API Operations =====
+    
+    def add_user_account(self, user_id: int, email: str, password: str, twofa_secret: str = None, proxy: str = None) -> int:
+        """Add account to user's account pool"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO user_accounts (user_id, email, password, twofa_secret, proxy)
+            VALUES (?, ?, ?, ?, ?)
+        """, (user_id, email, password, twofa_secret, proxy))
+        account_id = cursor.lastrowid
+        conn.commit()
+        conn.close()
+        return account_id
+    
+    def get_user_accounts(self, user_id: int, active_only: bool = True) -> List[Dict]:
+        """Get user's accounts from pool"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        query = "SELECT * FROM user_accounts WHERE user_id=?"
+        if active_only:
+            query += " AND is_active=1"
+        query += " ORDER BY id"
+        cursor.execute(query, (user_id,))
+        accounts = [dict(row) for row in cursor.fetchall()]
+        conn.close()
+        return accounts
+    
+    def delete_user_account(self, account_id: int) -> bool:
+        """Delete account from user's pool"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM user_accounts WHERE id=?", (account_id,))
+        conn.commit()
+        conn.close()
+        return True
+    
+    def add_user_emails(self, user_id: int, emails: List[str]) -> int:
+        """Bulk add emails to user's email list"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        count = 0
+        for email in emails:
+            cursor.execute("""
+                INSERT INTO user_emails (user_id, email)
+                VALUES (?, ?)
+            """, (user_id, email.strip()))
+            count += 1
+        conn.commit()
+        conn.close()
+        return count
+    
+    def get_user_emails(self, user_id: int, unprocessed_only: bool = True, limit: int = None) -> List[Dict]:
+        """Get user's email list"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        query = "SELECT * FROM user_emails WHERE user_id=?"
+        if unprocessed_only:
+            query += " AND is_processed=0"
+        query += " ORDER BY id"
+        if limit:
+            query += f" LIMIT {limit}"
+        cursor.execute(query, (user_id,))
+        emails = [dict(row) for row in cursor.fetchall()]
+        conn.close()
+        return emails
+    
+    def mark_email_processed(self, email_id: int) -> bool:
+        """Mark email as processed"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            UPDATE user_emails 
+            SET is_processed=1, processed_at=CURRENT_TIMESTAMP 
+            WHERE id=?
+        """, (email_id,))
+        conn.commit()
+        conn.close()
+        return True
+    
+    def delete_user_email(self, email_id: int) -> bool:
+        """Delete email from user's list"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM user_emails WHERE id=?", (email_id,))
+        conn.commit()
+        conn.close()
+        return True
+    
+    def get_user_settings(self, user_id: int) -> Dict:
+        """Get user settings"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM user_settings WHERE user_id=?", (user_id,))
+        settings = cursor.fetchone()
+        if not settings:
+            # Create default settings
+            cursor.execute("""
+                INSERT INTO user_settings (user_id, emails_per_account, interval_minutes, max_browsers, use_api_mode)
+                VALUES (?, 10, 10, 3, 1)
+            """, (user_id,))
+            conn.commit()
+            cursor.execute("SELECT * FROM user_settings WHERE user_id=?", (user_id,))
+            settings = cursor.fetchone()
+        conn.close()
+        return dict(settings) if settings else {}
+    
+    def update_user_settings(self, user_id: int, **kwargs) -> bool:
+        """Update user settings"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        # First ensure settings exist
+        cursor.execute("SELECT user_id FROM user_settings WHERE user_id=?", (user_id,))
+        if not cursor.fetchone():
+            cursor.execute("""
+                INSERT INTO user_settings (user_id) VALUES (?)
+            """, (user_id,))
+        
+        # Update settings
+        updates = []
+        values = []
+        for key, value in kwargs.items():
+            if key in ['emails_per_account', 'interval_minutes', 'max_browsers', 'use_api_mode']:
+                updates.append(f"{key}=?")
+                values.append(value)
+        
+        if updates:
+            query = f"UPDATE user_settings SET {', '.join(updates)} WHERE user_id=?"
+            values.append(user_id)
+            cursor.execute(query, tuple(values))
+        
+        conn.commit()
+        conn.close()
+        return True
+    
+    # ===== FEATURE 4 & 6: PC Status Operations =====
+    
+    def update_pc_status(self, user_id: int, pc_id: str, pc_name: str, status: str, current_account: str = None) -> bool:
+        """Update PC status for monitoring"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT OR REPLACE INTO pc_status 
+            (user_id, pc_id, pc_name, status, current_account, last_heartbeat)
+            VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        """, (user_id, pc_id, pc_name, status, current_account))
+        conn.commit()
+        conn.close()
+        return True
+    
+    def get_user_pcs(self, user_id: int) -> List[Dict]:
+        """Get all PCs for a user"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT * FROM pc_status WHERE user_id=? ORDER BY last_heartbeat DESC
+        """, (user_id,))
+        pcs = [dict(row) for row in cursor.fetchall()]
+        conn.close()
+        return pcs
+    
+    def set_pc_pause(self, user_id: int, pc_id: str, pause: bool) -> bool:
+        """Set pause flag for PC (server-side control)"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            UPDATE pc_status SET paused_by_server=? WHERE user_id=? AND pc_id=?
+        """, (1 if pause else 0, user_id, pc_id))
+        conn.commit()
+        conn.close()
+        return True
+    
+    def should_pc_pause(self, user_id: int, pc_id: str) -> bool:
+        """Check if PC should be paused"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT paused_by_server FROM pc_status WHERE user_id=? AND pc_id=?
+        """, (user_id, pc_id))
+        result = cursor.fetchone()
+        conn.close()
+        return result['paused_by_server'] == 1 if result else False
 
 # Initialize database
 db = Database()
