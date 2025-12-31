@@ -2,6 +2,12 @@
 
 let activityChart;
 
+// CSRF Token Helper
+function getCSRFToken() {
+    const meta = document.querySelector('meta[name="csrf-token"]');
+    return meta ? meta.content : '';
+}
+
 document.addEventListener('DOMContentLoaded', () => {
     loadDashboardStats();  // Bug Fix #3: Load real stats
     loadUserActivities();
@@ -142,7 +148,10 @@ async function uploadAccounts() {
     try {
         const response = await fetch('/api/user/accounts', {
             method: 'POST',
-            headers: {'Content-Type': 'application/json'},
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': getCSRFToken()
+            },
             body: JSON.stringify(accounts)
         });
         if (!response.ok) throw new Error('Upload failed');
@@ -159,7 +168,12 @@ async function uploadAccounts() {
 async function deleteAccount(accountId) {
     if (!confirm('Delete this account?')) return;
     try {
-        const response = await fetch(`/api/user/accounts?account_id=${accountId}`, {method: 'DELETE'});
+        const response = await fetch(`/api/user/accounts?account_id=${accountId}`, {
+            method: 'DELETE',
+            headers: {
+                'X-CSRFToken': getCSRFToken()
+            }
+        });
         if (!response.ok) throw new Error('Delete failed');
         alert('Account deleted');
         loadAccounts();
@@ -250,7 +264,10 @@ async function uploadEmails() {
     try {
         const response = await fetch('/api/user/emails', {
             method: 'POST',
-            headers: {'Content-Type': 'application/json'},
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': getCSRFToken()
+            },
             body: JSON.stringify(emails)
         });
         
@@ -287,7 +304,12 @@ async function uploadEmails() {
 async function deleteEmail(emailId) {
     if (!confirm('Delete this email?')) return;
     try {
-        const response = await fetch(`/api/user/emails?email_id=${emailId}`, {method: 'DELETE'});
+        const response = await fetch(`/api/user/emails?email_id=${emailId}`, {
+            method: 'DELETE',
+            headers: {
+                'X-CSRFToken': getCSRFToken()
+            }
+        });
         if (!response.ok) throw new Error('Delete failed');
         alert('Email deleted');
         loadEmails();
@@ -326,7 +348,10 @@ async function saveSettings() {
     try {
         const response = await fetch('/api/user/settings', {
             method: 'POST',
-            headers: {'Content-Type': 'application/json'},
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': getCSRFToken()
+            },
             body: JSON.stringify(settings)
         });
         if (!response.ok) throw new Error('Save failed');
@@ -511,7 +536,10 @@ async function deleteDoneEmail(emailId) {
     
     try {
         const response = await fetch(`/api/user/emails-done?id=${emailId}`, {
-            method: 'DELETE'
+            method: 'DELETE',
+            headers: {
+                'X-CSRFToken': getCSRFToken()
+            }
         });
         if (!response.ok) throw new Error('Delete failed');
         
@@ -534,7 +562,10 @@ async function cleanAllDoneEmails() {
     
     try {
         const response = await fetch('/api/user/emails-done?action=clean', {
-            method: 'DELETE'
+            method: 'DELETE',
+            headers: {
+                'X-CSRFToken': getCSRFToken()
+            }
         });
         if (!response.ok) throw new Error('Clean failed');
         
