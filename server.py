@@ -290,6 +290,241 @@ def delete_screenshot(screenshot_id):
 
 # ===== Export Routes =====
 
+# ===== Feature 2: API System - Account & Email Management =====
+
+@app.route('/api/user/accounts', methods=['GET', 'POST', 'DELETE'])
+@login_required
+def manage_accounts():
+    user_id = session['user_id']
+    
+    if request.method == 'GET':
+        accounts = db.get_user_accounts(user_id)
+        return jsonify({"success": True, "accounts": accounts})
+    
+    elif request.method == 'POST':
+        data = request.get_json()
+        # Support both single account and bulk upload
+        if isinstance(data, list):
+            # Bulk upload
+            for account in data:
+                db.add_user_account(
+                    user_id=user_id,
+                    email=account['email'],
+                    password=account['password'],
+                    twofa_secret=account.get('2fa_secret', ''),
+                    proxy=account.get('proxy', '')
+                )
+            return jsonify({"success": True, "count": len(data)})
+        else:
+            # Single account
+            db.add_user_account(
+                user_id=user_id,
+                email=data['email'],
+                password=data['password'],
+                twofa_secret=data.get('2fa_secret', ''),
+                proxy=data.get('proxy', '')
+            )
+            return jsonify({"success": True})
+    
+    elif request.method == 'DELETE':
+        account_id = request.args.get('account_id', type=int)
+        if account_id:
+            db.delete_user_account(account_id, user_id)
+        return jsonify({"success": True})
+
+@app.route('/api/user/emails', methods=['GET', 'POST', 'DELETE'])
+@login_required
+def manage_emails():
+    user_id = session['user_id']
+    
+    if request.method == 'GET':
+        emails = db.get_user_emails(user_id)
+        return jsonify({"success": True, "emails": emails})
+    
+    elif request.method == 'POST':
+        data = request.get_json()
+        # Support both single email and bulk upload
+        if isinstance(data, list):
+            # Bulk upload
+            for email in data:
+                db.add_user_email(user_id=user_id, email=email)
+            return jsonify({"success": True, "count": len(data)})
+        else:
+            # Single email
+            db.add_user_email(user_id=user_id, email=data['email'])
+            return jsonify({"success": True})
+    
+    elif request.method == 'DELETE':
+        email_id = request.args.get('email_id', type=int)
+        if email_id:
+            db.delete_user_email(email_id, user_id)
+        return jsonify({"success": True})
+
+@app.route('/api/user/settings', methods=['GET', 'POST'])
+@login_required
+def manage_settings():
+    user_id = session['user_id']
+    
+    if request.method == 'GET':
+        settings = db.get_user_settings(user_id)
+        return jsonify({"success": True, "settings": settings})
+    
+    elif request.method == 'POST':
+        data = request.get_json()
+        db.update_user_settings(
+            user_id=user_id,
+            emails_per_account=data.get('emails_per_account', 10),
+            interval_minutes=data.get('interval_minutes', 10),
+            max_browsers=data.get('max_browsers', 3),
+            api_mode_enabled=data.get('api_mode_enabled', True)
+        )
+        return jsonify({"success": True})
+
+@app.route('/api/desktop/get-work', methods=['POST'])
+def get_desktop_work():
+    """API endpoint for desktop app to fetch accounts and emails"""
+    data = request.get_json()
+    user_id = data.get('user_id')
+    pc_id = data.get('pc_id')
+    
+    if not user_id or not pc_id:
+        return jsonify({"error": "user_id and pc_id required"}), 400
+    
+    # Get user settings
+    settings = db.get_user_settings(user_id)
+    
+    if not settings.get('api_mode_enabled'):
+        return jsonify({"api_mode": False})
+    
+    # Get accounts and emails
+    accounts = db.get_user_accounts(user_id)
+    emails = db.get_user_emails(user_id, status='pending')
+    
+    return jsonify({
+        "api_mode": True,
+        "accounts": accounts,
+        "emails": emails,
+        "settings": settings
+    })
+
+# ===== Feature 4: Auto Pause/Resume =====
+
+@app.route('/api/pc/heartbeat', methods=['POST'])
+def pc_heartbeat():
+    """Desktop app sends heartbeat every minute"""
+    data = request.get_json()
+    user_id = data.get('user_id')
+    pc_id = data.get('pc_id')
+    pc_name = data.get('pc_name', 'Unknown')
+    current_account = data.get('current_account', '')
+    
+    if not user_id or not pc_id:
+        return jsonify({"error": "user_id and pc_id required"}), 400
+    
+    # Update PC status
+    db.update_pc_status(user_id, pc_id, pc_name, current_account)
+    
+    # Check if PC should be paused
+    should_pause = db.should_pc_pause(pc_id)
+    
+    return jsonify({
+        "success": True,
+        "should_pause": should_pause
+    })
+
+@app.route('/api/pc/status', methods=['GET'])
+@login_required
+def get_pc_status():
+    """Get all PCs status for a user"""
+    user_id = request.args.get('user_id', session.get('user_id'), type=int)
+    
+    # Admin can see any user, users can only see their own
+    if session.get('role') != 'admin' and user_id != session.get('user_id'):
+        return jsonify({"error": "Unauthorized"}), 403
+    
+    pcs = db.get_user_pcs(user_id)
+    return jsonify({"success": True, "pcs": pcs})
+
+@app.route('/api/pc/pause', methods=['POST'])
+@login_required
+@admin_required
+def pause_pc():
+    """Admin can remotely pause a PC"""
+    data = request.get_json()
+    pc_id = data.get('pc_id')
+    pause = data.get('pause', True)
+    
+    db.set_pc_pause(pc_id, pause)
+    return jsonify({"success": True})
+
+# ===== Feature 6: Real-time Monitoring =====
+
+@app.route('/api/monitoring/live-stats', methods=['GET'])
+@login_required
+def get_live_stats():
+    """Get real-time statistics"""
+    user_id = request.args.get('user_id', session.get('user_id'), type=int)
+    
+    # Admin can see any user, users can only see their own
+    if session.get('role') != 'admin' and user_id != session.get('user_id'):
+        return jsonify({"error": "Unauthorized"}), 403
+    
+    # Get PC status
+    pcs = db.get_user_pcs(user_id)
+    
+    # Get recent activity count
+    activities = db.get_user_activities(user_id, limit=100)
+    
+    # Calculate stats
+    online_pcs = sum(1 for pc in pcs if pc['status'] == 'online')
+    total_emails_today = len([a for a in activities if a['created_at'].startswith(datetime.datetime.now().strftime('%Y-%m-%d'))])
+    
+    return jsonify({
+        "success": True,
+        "online_pcs": online_pcs,
+        "total_pcs": len(pcs),
+        "emails_today": total_emails_today,
+        "pcs": pcs,
+        "recent_activities": activities[:20]
+    })
+
+# ===== Feature 8: Notification System =====
+
+@app.route('/api/notifications', methods=['GET'])
+@login_required
+def get_notifications():
+    """Get user notifications"""
+    user_id = session['user_id']
+    
+    notifications = []
+    
+    # Check for offline PCs
+    pcs = db.get_user_pcs(user_id)
+    for pc in pcs:
+        if pc['status'] == 'offline':
+            notifications.append({
+                "type": "warning",
+                "message": f"PC {pc['pc_name']} is offline",
+                "timestamp": pc['last_heartbeat']
+            })
+    
+    # Check for license expiry (if user)
+    if session.get('role') != 'admin':
+        user = db.get_user(user_id)
+        if user and user.get('licenses'):
+            for lic in user['licenses']:
+                if lic.get('expires_at'):
+                    expires = datetime.datetime.strptime(lic['expires_at'], '%Y-%m-%d %H:%M:%S')
+                    days_left = (expires - datetime.datetime.now()).days
+                    if days_left <= 7 and days_left >= 0:
+                        notifications.append({
+                            "type": "warning",
+                            "message": f"License expires in {days_left} days",
+                            "timestamp": datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                        })
+    
+    return jsonify({"success": True, "notifications": notifications})
+
 @app.route('/api/export/csv')
 @login_required
 def export_csv():

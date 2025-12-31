@@ -668,15 +668,15 @@ class Database:
     
     # ===== FEATURE 4 & 6: PC Status Operations =====
     
-    def update_pc_status(self, user_id: int, pc_id: str, pc_name: str, status: str, current_account: str = None) -> bool:
-        """Update PC status for monitoring"""
+    def update_pc_status(self, user_id: int, pc_id: str, pc_name: str, current_account: str = None) -> bool:
+        """Update PC status for monitoring (heartbeat)"""
         conn = self.get_connection()
         cursor = conn.cursor()
         cursor.execute("""
             INSERT OR REPLACE INTO pc_status 
             (user_id, pc_id, pc_name, status, current_account, last_heartbeat)
-            VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-        """, (user_id, pc_id, pc_name, status, current_account))
+            VALUES (?, ?, ?, 'online', ?, CURRENT_TIMESTAMP)
+        """, (user_id, pc_id, pc_name, current_account))
         conn.commit()
         conn.close()
         return True
@@ -692,27 +692,39 @@ class Database:
         conn.close()
         return pcs
     
-    def set_pc_pause(self, user_id: int, pc_id: str, pause: bool) -> bool:
+    def set_pc_pause(self, pc_id: str, pause: bool) -> bool:
         """Set pause flag for PC (server-side control)"""
         conn = self.get_connection()
         cursor = conn.cursor()
         cursor.execute("""
-            UPDATE pc_status SET paused_by_server=? WHERE user_id=? AND pc_id=?
-        """, (1 if pause else 0, user_id, pc_id))
+            UPDATE pc_status SET paused_by_server=? WHERE pc_id=?
+        """, (1 if pause else 0, pc_id))
         conn.commit()
         conn.close()
         return True
     
-    def should_pc_pause(self, user_id: int, pc_id: str) -> bool:
+    def should_pc_pause(self, pc_id: str) -> bool:
         """Check if PC should be paused"""
         conn = self.get_connection()
         cursor = conn.cursor()
         cursor.execute("""
-            SELECT paused_by_server FROM pc_status WHERE user_id=? AND pc_id=?
-        """, (user_id, pc_id))
+            SELECT paused_by_server FROM pc_status WHERE pc_id=?
+        """, (pc_id,))
         result = cursor.fetchone()
         conn.close()
         return result['paused_by_server'] == 1 if result else False
+    
+    def delete_user_account(self, account_id: int, user_id: int = None) -> bool:
+        """Delete account from user's account pool"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        if user_id:
+            cursor.execute("DELETE FROM user_accounts WHERE id=? AND user_id=?", (account_id, user_id))
+        else:
+            cursor.execute("DELETE FROM user_accounts WHERE id=?", (account_id,))
+        conn.commit()
+        conn.close()
+        return True
 
 # Initialize database
 db = Database()

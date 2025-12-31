@@ -19,6 +19,18 @@
                 <a href="/user/dashboard" class="nav-item active">
                     <span class="icon">📊</span> Dashboard
                 </a>
+                <a href="#" onclick="showAccountsPanel()" class="nav-item">
+                    <span class="icon">👤</span> My Accounts
+                </a>
+                <a href="#" onclick="showEmailsPanel()" class="nav-item">
+                    <span class="icon">📧</span> Email List
+                </a>
+                <a href="#" onclick="showSettingsPanel()" class="nav-item">
+                    <span class="icon">⚙️</span> Settings
+                </a>
+                <a href="#" onclick="showPCsPanel()" class="nav-item">
+                    <span class="icon">💻</span> My PCs
+                </a>
                 <a href="/logout" class="nav-item">
                     <span class="icon">🚪</span> Logout
                 </a>
@@ -67,6 +79,113 @@
                         <h3 id="todayEmails">0</h3>
                         <p>Today's Activity</p>
                     </div>
+                </div>
+            </div>
+
+            <!-- Chart -->
+            <div class="content-section">
+                <h3>Last 30 Days Activity</h3>
+                <canvas id="activityChart"></canvas>
+            </div>
+
+            <!-- Accounts Management Panel -->
+            <div id="accountsPanel" class="content-section" style="display: none;">
+                <h3>📁 My Accounts</h3>
+                <div class="upload-section">
+                    <h4>Upload Accounts (CSV format)</h4>
+                    <p>Format: email,password,2fa_secret,proxy (one per line)</p>
+                    <textarea id="accountsInput" rows="10" placeholder="user@example.com,password123,ABCD1234,proxy.server:8080&#10;user2@example.com,pass456,,"></textarea>
+                    <button class="btn btn-primary" onclick="uploadAccounts()">⬆️ Upload Accounts</button>
+                </div>
+                <div class="table-container">
+                    <h4>Current Accounts</h4>
+                    <table class="data-table" id="accountsTable">
+                        <thead>
+                            <tr>
+                                <th>Email</th>
+                                <th>2FA</th>
+                                <th>Proxy</th>
+                                <th>Status</th>
+                                <th>Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="accountsTableBody">
+                            <!-- Populated by JavaScript -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Emails Management Panel -->
+            <div id="emailsPanel" class="content-section" style="display: none;">
+                <h3>📧 Email List</h3>
+                <div class="upload-section">
+                    <h4>Upload Email List (one per line)</h4>
+                    <textarea id="emailsInput" rows="10" placeholder="user1@example.com&#10;user2@example.com&#10;user3@example.com"></textarea>
+                    <button class="btn btn-primary" onclick="uploadEmails()">⬆️ Upload Emails</button>
+                </div>
+                <div class="table-container">
+                    <h4>Current Email Queue</h4>
+                    <p>Total: <span id="emailCount">0</span> | Pending: <span id="emailPending">0</span> | Processed: <span id="emailProcessed">0</span></p>
+                    <table class="data-table" id="emailsTable">
+                        <thead>
+                            <tr>
+                                <th>Email</th>
+                                <th>Status</th>
+                                <th>Processed At</th>
+                                <th>Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="emailsTableBody">
+                            <!-- Populated by JavaScript -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Settings Panel -->
+            <div id="settingsPanel" class="content-section" style="display: none;">
+                <h3>⚙️ Settings</h3>
+                <div class="settings-form">
+                    <div class="form-group">
+                        <label>Emails Per Account:</label>
+                        <input type="number" id="emailsPerAccount" value="10" min="1" max="100">
+                    </div>
+                    <div class="form-group">
+                        <label>Interval (minutes):</label>
+                        <input type="number" id="intervalMinutes" value="10" min="1" max="60">
+                    </div>
+                    <div class="form-group">
+                        <label>Max Browsers Per PC:</label>
+                        <input type="number" id="maxBrowsers" value="3" min="1" max="10">
+                    </div>
+                    <div class="form-group">
+                        <label>
+                            <input type="checkbox" id="apiModeEnabled" checked>
+                            Enable API Mode (Desktop apps will fetch from web panel)
+                        </label>
+                    </div>
+                    <button class="btn btn-primary" onclick="saveSettings()">💾 Save Settings</button>
+                </div>
+            </div>
+
+            <!-- PCs Panel -->
+            <div id="pcsPanel" class="content-section" style="display: none;">
+                <h3>💻 My PCs</h3>
+                <div class="table-container">
+                    <table class="data-table" id="pcsTable">
+                        <thead>
+                            <tr>
+                                <th>PC Name</th>
+                                <th>Status</th>
+                                <th>Current Account</th>
+                                <th>Last Seen</th>
+                            </tr>
+                        </thead>
+                        <tbody id="pcsTableBody">
+                            <!-- Populated by JavaScript -->
+                        </tbody>
+                    </table>
                 </div>
             </div>
 
