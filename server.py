@@ -11,8 +11,38 @@ from database import db
 from config import *
 import json
 
+# Bug Fix #7 & #9: CSRF Protection and Rate Limiting
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
+from flask_wtf.csrf import CSRFProtect
+
 app = Flask(__name__)
 app.secret_key = SECRET_KEY
+
+# Bug Fix #7: CSRF Protection
+csrf = CSRFProtect(app)
+
+# Bug Fix #9: Rate Limiting
+limiter = Limiter(
+    app=app,
+    key_func=get_remote_address,
+    default_limits=["200 per hour"],
+    storage_uri="memory://"
+)
+
+# Bug Fix #14: Standard error response helper
+def error_response(message: str, code: int = 400):
+    """Standardized error response"""
+    return jsonify({"success": False, "error": message}), code
+
+def success_response(data=None, message=None):
+    """Standardized success response"""
+    response = {"success": True}
+    if data is not None:
+        response.update(data)
+    if message:
+        response["message"] = message
+    return jsonify(response)
 
 # Authentication decorator
 def login_required(f):
@@ -27,7 +57,7 @@ def admin_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
         if 'user_id' not in session or session.get('role') != 'admin':
-            return jsonify({"error": "Admin access required"}), 403
+            return error_response("Admin access required", 403)
         return f(*args, **kwargs)
     return decorated_function
 
@@ -202,6 +232,14 @@ def get_user_stats():
     stats = db.get_user_stats(user_id, days)
     return jsonify(stats)
 
+# Bug Fix #3: Real dashboard stats
+@app.route('/api/user/dashboard-stats')
+@login_required
+def get_dashboard_stats():
+    user_id = session['user_id']
+    stats = db.get_user_dashboard_stats(user_id)
+    return success_response(stats)
+
 @app.route('/api/user/screenshots')
 @login_required
 def get_user_screenshots():
@@ -213,6 +251,7 @@ def get_user_screenshots():
 # ===== License Validation API (for desktop app) =====
 
 @app.route('/api/validate-license', methods=['POST'])
+@csrf.exempt  # Exempt desktop app endpoints from CSRF
 def validate_license():
     data = request.get_json()
     license_key = data.get('license_key')
@@ -223,6 +262,7 @@ def validate_license():
     return jsonify(result)
 
 @app.route('/api/log-activity', methods=['POST'])
+@csrf.exempt  # Exempt desktop app
 def log_activity():
     data = request.get_json()
     db.log_email_activity(
@@ -235,6 +275,7 @@ def log_activity():
     return jsonify({"success": True})
 
 @app.route('/api/upload-screenshot', methods=['POST'])
+@csrf.exempt  # Exempt desktop app
 def upload_screenshot():
     if 'screenshot' not in request.files:
         return jsonify({"error": "No screenshot file"}), 400
@@ -299,8 +340,18 @@ def get_screenshot(filename):
 @app.route('/api/screenshot/delete/<int:screenshot_id>', methods=['DELETE'])
 @login_required
 def delete_screenshot(screenshot_id):
-    success = db.delete_screenshot(screenshot_id)
-    return jsonify({"success": success})
+    user_id = session['user_id']
+    is_admin = session.get('role') == 'admin'
+    
+    # Bug Fix #5: Delete with ownership check
+    success = db.delete_screenshot_safe(screenshot_id, user_id, is_admin)
+    
+    if success:
+        # Bug Fix #12: Audit log
+        db.log_audit(user_id, 'delete_screenshot', 'screenshot', screenshot_id, None, request.remote_addr)
+        return success_response({"message": "Screenshot deleted"})
+    else:
+        return error_response("Screenshot not found or unauthorized", 404)
 
 # ===== Export Routes =====
 
@@ -348,31 +399,72 @@ def manage_accounts():
 
 @app.route('/api/user/emails', methods=['GET', 'POST', 'DELETE'])
 @login_required
+@limiter.limit("100 per hour")  # Bug Fix #9: Rate limiting
 def manage_emails():
     user_id = session['user_id']
     
     if request.method == 'GET':
-        emails = db.get_user_emails(user_id)
-        return jsonify({"success": True, "emails": emails})
+        # Bug Fix #6: Pagination support
+        limit = request.args.get('limit', 100, type=int)
+        offset = request.args.get('offset', 0, type=int)
+        
+        if limit > 0:  # If pagination requested
+            result = db.get_user_emails_paginated(user_id, True, limit, offset)
+            return success_response(result)
+        else:
+            emails = db.get_user_emails(user_id)
+            return success_response({"emails": emails})
     
     elif request.method == 'POST':
         data = request.get_json()
-        # Support both single email and bulk upload
-        if isinstance(data, list):
-            # Bulk upload
-            for email in data:
-                db.add_user_email(user_id=user_id, email=email)
-            return jsonify({"success": True, "count": len(data)})
-        else:
-            # Single email
-            db.add_user_email(user_id=user_id, email=data['email'])
-            return jsonify({"success": True})
+        
+        try:
+            # Support both single email and bulk upload
+            if isinstance(data, list):
+                # Bug Fix #11: Transactional bulk upload
+                result = db.add_user_emails_transactional(user_id, data)
+                
+                # Bug Fix #12: Audit log
+                db.log_audit(user_id, 'bulk_add_emails', 'email', None, 
+                           f"Added {result['added']}, Skipped {result['skipped']}", 
+                           request.remote_addr)
+                
+                return success_response(result)
+            else:
+                # Bug Fix #2 & #8: Single email with validation
+                email = data.get('email')
+                if not email:
+                    return error_response("Email is required", 400)
+                
+                success = db.add_user_email(user_id=user_id, email=email)
+                
+                if success:
+                    # Bug Fix #12: Audit log
+                    db.log_audit(user_id, 'add_email', 'email', None, email, request.remote_addr)
+                    return success_response({"message": "Email added"})
+                else:
+                    return error_response("Email already exists or invalid", 400)
+                    
+        except ValueError as e:
+            # Bug Fix #8: Email validation error
+            return error_response(str(e), 400)
+        except Exception as e:
+            return error_response(f"Error adding email: {str(e)}", 500)
     
     elif request.method == 'DELETE':
         email_id = request.args.get('email_id', type=int)
-        if email_id:
-            db.delete_user_email(email_id, user_id)
-        return jsonify({"success": True})
+        if not email_id:
+            return error_response("Email ID required", 400)
+        
+        # Bug Fix #5: Delete with ownership check
+        success = db.delete_user_email(email_id, user_id)
+        
+        if success:
+            # Bug Fix #12: Audit log
+            db.log_audit(user_id, 'delete_email', 'email', email_id, None, request.remote_addr)
+            return success_response({"message": "Email deleted"})
+        else:
+            return error_response("Email not found or unauthorized", 404)
 
 # NEW: Done/Processed Emails Endpoints
 @app.route('/api/user/emails-done', methods=['GET', 'POST', 'DELETE'])
@@ -383,7 +475,7 @@ def manage_emails_done():
     if request.method == 'GET':
         # Get all processed emails
         done_emails = db.get_done_emails(user_id)
-        return jsonify({"success": True, "emails": done_emails})
+        return success_response({"emails": done_emails})
     
     elif request.method == 'POST':
         # Move email to done
@@ -392,21 +484,35 @@ def manage_emails_done():
         account_used = data.get('account_used')
         pc_id = data.get('pc_id')
         db.move_email_to_done(user_id, email, account_used, pc_id)
-        return jsonify({"success": True})
+        
+        # Bug Fix #12: Audit log
+        db.log_audit(user_id, 'move_email_to_done', 'email', None, email, request.remote_addr)
+        
+        return success_response({"message": "Email moved to done"})
     
     elif request.method == 'DELETE':
         action = request.args.get('action')
         if action == 'clean':
             # Clean all done emails
             count = db.clean_done_emails(user_id)
-            return jsonify({"success": True, "deleted": count})
+            
+            # Bug Fix #12: Audit log
+            db.log_audit(user_id, 'clean_done_emails', 'email', None, 
+                       f"Cleaned {count} emails", request.remote_addr)
+            
+            return success_response({"deleted": count, "message": f"{count} emails cleaned"})
         else:
             # Delete single done email
             email_id = request.args.get('id', type=int)
-            if email_id:
-                db.delete_done_email(email_id)
-                return jsonify({"success": True})
-            return jsonify({"error": "Email ID required"}), 400
+            if not email_id:
+                return error_response("Email ID required", 400)
+            
+            db.delete_done_email(email_id)
+            
+            # Bug Fix #12: Audit log
+            db.log_audit(user_id, 'delete_done_email', 'email', email_id, None, request.remote_addr)
+            
+            return success_response({"message": "Done email deleted"})
 
 @app.route('/api/user/settings', methods=['GET', 'POST'])
 @login_required

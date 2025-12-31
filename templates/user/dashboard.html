@@ -50,37 +50,45 @@
             <!-- Stats Cards -->
             <div class="stats-grid">
                 <div class="stat-card">
-                    <div class="stat-icon">🔑</div>
+                    <div class="stat-icon">👤</div>
                     <div class="stat-info">
-                        <h3 id="myLicenses">{{ licenses|length }}</h3>
-                        <p>My Licenses</p>
+                        <h3 data-stat="accounts">0</h3>
+                        <p>My Accounts</p>
                     </div>
                 </div>
                 <div class="stat-card">
-                    <div class="stat-icon">✉️</div>
+                    <div class="stat-icon">📧</div>
                     <div class="stat-info">
-                        <h3 id="myTotalEmails">{{ stats.totals.total_success }}</h3>
-                        <p>Emails Added</p>
+                        <h3 data-stat="emails">0</h3>
+                        <p>Pending Emails</p>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon">💻</div>
+                    <div class="stat-info">
+                        <h3 data-stat="pcs">0</h3>
+                        <p>Active PCs</p>
                     </div>
                 </div>
                 <div class="stat-card">
                     <div class="stat-icon">✅</div>
                     <div class="stat-info">
-                        <h3 id="mySuccessRate">
-                            {% if stats.totals.total_activities > 0 %}
-                            {{ (stats.totals.total_success * 100 / stats.totals.total_activities)|round|int }}%
-                            {% else %}
-                            0%
-                            {% endif %}
-                        </h3>
-                        <p>Success Rate</p>
+                        <h3 data-stat="done-emails">0</h3>
+                        <p>Emails Added</p>
                     </div>
                 </div>
                 <div class="stat-card">
-                    <div class="stat-icon">📅</div>
+                    <div class="stat-icon">📈</div>
                     <div class="stat-info">
-                        <h3 id="todayEmails">0</h3>
-                        <p>Today's Activity</p>
+                        <h3 data-stat="today-added">0</h3>
+                        <p>Today Added</p>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon">❌</div>
+                    <div class="stat-info">
+                        <h3 data-stat="today-failed">0</h3>
+                        <p>Today Failed</p>
                     </div>
                 </div>
             </div>

@@ -132,7 +132,8 @@ class Database:
                 is_processed INTEGER DEFAULT 0,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 processed_at TIMESTAMP,
-                FOREIGN KEY (user_id) REFERENCES users (id)
+                FOREIGN KEY (user_id) REFERENCES users (id),
+                UNIQUE(user_id, email)
             )
         ''')
         
@@ -174,6 +175,21 @@ class Database:
                 paused_by_server INTEGER DEFAULT 0,
                 FOREIGN KEY (user_id) REFERENCES users (id),
                 UNIQUE(user_id, pc_id)
+            )
+        ''')
+        
+        # Audit Log table (Bug Fix #12)
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS audit_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                action TEXT NOT NULL,
+                entity_type TEXT NOT NULL,
+                entity_id INTEGER,
+                details TEXT,
+                ip_address TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users (id)
             )
         ''')
         
@@ -595,8 +611,8 @@ class Database:
         conn.close()
         return accounts
     
-    def delete_user_account(self, account_id: int) -> bool:
-        """Delete account from user's pool"""
+    def delete_user_account_old(self, account_id: int) -> bool:
+        """Delete account from user's pool (deprecated - use delete_user_account)"""
         conn = self.get_connection()
         cursor = conn.cursor()
         cursor.execute("DELETE FROM user_accounts WHERE id=?", (account_id,))
@@ -817,6 +833,215 @@ class Database:
         conn.commit()
         conn.close()
         return True
+    
+    # ===== Bug Fix Methods =====
+    
+    # Bug Fix #2: Wrapper method for single email add
+    def add_user_email(self, user_id: int, email: str) -> bool:
+        """Add single email to user's email list (wrapper)"""
+        import re
+        # Bug Fix #8: Email validation
+        email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+        if not re.match(email_pattern, email.strip()):
+            raise ValueError(f"Invalid email format: {email}")
+        
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        try:
+            # Bug Fix #4: INSERT OR IGNORE to prevent duplicates
+            cursor.execute("""
+                INSERT OR IGNORE INTO user_emails (user_id, email)
+                VALUES (?, ?)
+            """, (user_id, email.strip()))
+            conn.commit()
+            success = cursor.rowcount > 0
+        except Exception as e:
+            conn.rollback()
+            raise e
+        finally:
+            conn.close()
+        return success
+    
+    # Bug Fix #5: DELETE with ownership check
+    def delete_user_email(self, email_id: int, user_id: int) -> bool:
+        """Delete email from user's list (with ownership check)"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        # Include user_id in WHERE to prevent unauthorized deletion
+        cursor.execute("DELETE FROM user_emails WHERE id=? AND user_id=?", (email_id, user_id))
+        rows_affected = cursor.rowcount
+        conn.commit()
+        conn.close()
+        return rows_affected > 0
+    
+    # Bug Fix #5: DELETE screenshot with ownership check
+    def delete_screenshot_safe(self, screenshot_id: int, user_id: int = None, is_admin: bool = False) -> bool:
+        """Delete screenshot with ownership check"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        if is_admin:
+            # Admin can delete any screenshot
+            cursor.execute("DELETE FROM screenshots WHERE id=?", (screenshot_id,))
+        else:
+            # Regular user can only delete own screenshots
+            cursor.execute("DELETE FROM screenshots WHERE id=? AND user_id=?", (screenshot_id, user_id))
+        rows_affected = cursor.rowcount
+        conn.commit()
+        conn.close()
+        return rows_affected > 0
+    
+    # Bug Fix #3: Get real dashboard stats
+    def get_user_dashboard_stats(self, user_id: int) -> Dict:
+        """Get real dashboard statistics for user"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        # Count accounts
+        cursor.execute("SELECT COUNT(*) as count FROM user_accounts WHERE user_id=?", (user_id,))
+        accounts_count = cursor.fetchone()['count']
+        
+        # Count emails (pending)
+        cursor.execute("SELECT COUNT(*) as count FROM user_emails WHERE user_id=? AND is_processed=0", (user_id,))
+        emails_count = cursor.fetchone()['count']
+        
+        # Count PCs
+        cursor.execute("SELECT COUNT(*) as count FROM pc_status WHERE user_id=?", (user_id,))
+        pcs_count = cursor.fetchone()['count']
+        
+        # Count done emails
+        cursor.execute("SELECT COUNT(*) as count FROM user_emails_done WHERE user_id=?", (user_id,))
+        done_emails_count = cursor.fetchone()['count']
+        
+        # Get today's stats
+        today = datetime.datetime.now().strftime('%Y-%m-%d')
+        cursor.execute("""
+            SELECT emails_added, emails_failed 
+            FROM daily_stats 
+            WHERE user_id=? AND date=?
+        """, (user_id, today))
+        today_stats = cursor.fetchone()
+        
+        conn.close()
+        
+        return {
+            "accounts": accounts_count,
+            "emails": emails_count,
+            "pcs": pcs_count,
+            "done_emails": done_emails_count,
+            "today_added": today_stats['emails_added'] if today_stats else 0,
+            "today_failed": today_stats['emails_failed'] if today_stats else 0
+        }
+    
+    # Bug Fix #6: Pagination support
+    def get_user_emails_paginated(self, user_id: int, unprocessed_only: bool = True, 
+                                   limit: int = 100, offset: int = 0) -> Dict:
+        """Get user's email list with pagination"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        # Get total count
+        count_query = "SELECT COUNT(*) as total FROM user_emails WHERE user_id=?"
+        if unprocessed_only:
+            count_query += " AND is_processed=0"
+        cursor.execute(count_query, (user_id,))
+        total = cursor.fetchone()['total']
+        
+        # Get paginated data
+        query = "SELECT * FROM user_emails WHERE user_id=?"
+        if unprocessed_only:
+            query += " AND is_processed=0"
+        query += f" ORDER BY id LIMIT ? OFFSET ?"
+        cursor.execute(query, (user_id, min(limit, 1000), offset))  # Max 1000 per request
+        emails = [dict(row) for row in cursor.fetchall()]
+        
+        conn.close()
+        return {
+            "emails": emails,
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+            "has_more": (offset + len(emails)) < total
+        }
+    
+    # Bug Fix #11: Transaction support for bulk operations
+    def add_user_emails_transactional(self, user_id: int, emails: List[str]) -> Dict:
+        """Bulk add emails with transaction support"""
+        import re
+        email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+        
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        added = 0
+        skipped = 0
+        errors = []
+        
+        try:
+            conn.execute("BEGIN TRANSACTION")
+            
+            for email in emails:
+                email = email.strip()
+                # Validate email
+                if not re.match(email_pattern, email):
+                    errors.append(f"Invalid format: {email}")
+                    skipped += 1
+                    continue
+                
+                # Insert with OR IGNORE for duplicates
+                cursor.execute("""
+                    INSERT OR IGNORE INTO user_emails (user_id, email)
+                    VALUES (?, ?)
+                """, (user_id, email))
+                
+                if cursor.rowcount > 0:
+                    added += 1
+                else:
+                    skipped += 1
+            
+            conn.commit()
+        except Exception as e:
+            conn.rollback()
+            conn.close()
+            raise e
+        finally:
+            conn.close()
+        
+        return {
+            "added": added,
+            "skipped": skipped,
+            "errors": errors
+        }
+    
+    # Bug Fix #12: Audit logging
+    def log_audit(self, user_id: int, action: str, entity_type: str, 
+                  entity_id: int = None, details: str = None, ip_address: str = None):
+        """Log user action for audit trail"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO audit_log (user_id, action, entity_type, entity_id, details, ip_address)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (user_id, action, entity_type, entity_id, details, ip_address))
+        conn.commit()
+        conn.close()
+    
+    def get_audit_logs(self, user_id: int = None, limit: int = 100) -> List[Dict]:
+        """Get audit logs"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        if user_id:
+            cursor.execute("""
+                SELECT * FROM audit_log WHERE user_id=? 
+                ORDER BY created_at DESC LIMIT ?
+            """, (user_id, limit))
+        else:
+            cursor.execute("""
+                SELECT * FROM audit_log 
+                ORDER BY created_at DESC LIMIT ?
+            """, (limit,))
+        logs = [dict(row) for row in cursor.fetchall()]
+        conn.close()
+        return logs
 
 # Initialize database
 db = Database()

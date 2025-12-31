@@ -3,10 +3,33 @@
 let activityChart;
 
 document.addEventListener('DOMContentLoaded', () => {
+    loadDashboardStats();  // Bug Fix #3: Load real stats
     loadUserActivities();
     loadStats();
     loadSettings();
 });
+
+// Bug Fix #3: Load real dashboard statistics
+async function loadDashboardStats() {
+    try {
+        const response = await fetch('/api/user/dashboard-stats');
+        if (!response.ok) throw new Error('Failed to load stats');
+        const data = await response.json();
+        
+        if (data.success) {
+            // Update card values with real data
+            const stats = data;
+            document.querySelector('[data-stat="accounts"]').textContent = stats.accounts || 0;
+            document.querySelector('[data-stat="emails"]').textContent = stats.emails || 0;
+            document.querySelector('[data-stat="pcs"]').textContent = stats.pcs || 0;
+            document.querySelector('[data-stat="done-emails"]').textContent = stats.done_emails || 0;
+            document.querySelector('[data-stat="today-added"]').textContent = stats.today_added || 0;
+            document.querySelector('[data-stat="today-failed"]').textContent = stats.today_failed || 0;
+        }
+    } catch (error) {
+        console.error('Error loading dashboard stats:', error);
+    }
+}
 
 // ===== Panel Navigation =====
 
@@ -190,10 +213,37 @@ async function uploadEmails() {
         return;
     }
     
-    const emails = input.split('\n').map(e => e.trim()).filter(e => e && e.includes('@'));
+    // Bug Fix #8 & #10: Email validation on client side
+    const emailPattern = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+    const lines = input.split('\n').map(e => e.trim()).filter(e => e);
+    const emails = [];
+    const invalids = [];
+    const duplicates = new Set();
+    
+    for (const email of lines) {
+        if (!emailPattern.test(email)) {
+            invalids.push(email);
+        } else if (duplicates.has(email.toLowerCase())) {
+            // Skip duplicate within the input
+            continue;
+        } else {
+            emails.push(email);
+            duplicates.add(email.toLowerCase());
+        }
+    }
+    
+    if (invalids.length > 0) {
+        alert(`Found ${invalids.length} invalid emails:\n${invalids.slice(0, 5).join('\n')}${invalids.length > 5 ? '\n...' : ''}\n\nPlease fix them and try again.`);
+        return;
+    }
     
     if (emails.length === 0) {
         alert('No valid emails found');
+        return;
+    }
+    
+    // Bug Fix #10: Confirm before uploading
+    if (!confirm(`Upload ${emails.length} emails?`)) {
         return;
     }
     
@@ -203,14 +253,34 @@ async function uploadEmails() {
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify(emails)
         });
-        if (!response.ok) throw new Error('Upload failed');
+        
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'Upload failed');
+        }
+        
         const data = await response.json();
-        alert(`${data.count} emails uploaded successfully!`);
+        
+        // Show detailed result
+        if (data.success) {
+            let message = `✅ Added: ${data.added || 0}\n`;
+            if (data.skipped > 0) {
+                message += `⚠️ Skipped (duplicates): ${data.skipped}\n`;
+            }
+            if (data.errors && data.errors.length > 0) {
+                message += `❌ Errors: ${data.errors.length}\n${data.errors.slice(0, 3).join('\n')}`;
+            }
+            alert(message);
+        } else {
+            alert(data.count ? `${data.count} emails uploaded!` : 'Upload complete');
+        }
+        
         document.getElementById('emailsInput').value = '';
         loadEmails();
+        loadDashboardStats();  // Refresh stats
     } catch (error) {
         console.error('Error uploading emails:', error);
-        alert('Error uploading emails');
+        alert(`Error: ${error.message}`);
     }
 }
 
