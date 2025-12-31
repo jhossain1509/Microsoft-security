@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+ENV/
+env/
+*.egg-info/
+dist/
+build/
+
+# Data files
+data/
+backups/
+screenshots/
+*.db
+*.sqlite
+*.sqlite3
+
+# User data
+accounts.csv
+emails.txt
+sent_done.txt
+failed_emails.txt
+logs_export.csv
+license.key
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Backup files
+*.backup
+*.bak
