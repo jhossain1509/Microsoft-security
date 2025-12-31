@@ -535,6 +535,7 @@ def manage_settings():
         return jsonify({"success": True})
 
 @app.route('/api/desktop/get-work', methods=['POST'])
+@csrf.exempt  # Desktop app endpoint - no CSRF needed
 def get_desktop_work():
     """API endpoint for desktop app to fetch accounts and emails"""
     data = request.get_json()
@@ -564,6 +565,7 @@ def get_desktop_work():
 # ===== Feature 4: Auto Pause/Resume =====
 
 @app.route('/api/pc/heartbeat', methods=['POST'])
+@csrf.exempt  # Desktop app endpoint - no CSRF needed
 def pc_heartbeat():
     """Desktop app sends heartbeat every minute"""
     data = request.get_json()
