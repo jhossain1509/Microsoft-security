@@ -15,9 +15,10 @@ try:
     import pystray
     from PIL import Image, ImageDraw, ImageGrab
     TRAY_AVAILABLE = True
-except ImportError:
+except ImportError as e:
     TRAY_AVAILABLE = False
-    print("Warning: pystray not available. System tray features disabled.")
+    print(f"⚠️  Warning: pystray not available ({e}). System tray features disabled.")
+    print("   Install with: pip install pystray")
 
 # Web integration
 try:
@@ -125,6 +126,7 @@ class GoldenITEntraGUI:
         
         # API Mode (Feature 2 & 5)
         self.api_mode_enabled = False
+        self.use_api_mode = tk.BooleanVar(value=False)  # GUI control for API mode
         self.api_settings = {}
         
         # Heartbeat (Feature 4)
@@ -190,6 +192,14 @@ class GoldenITEntraGUI:
         ctk.CTkEntry(top, textvariable=self.per_account, width=50).place(x=180, y=115)
         ctk.CTkLabel(top, text="Batch browsers:").place(x=250, y=115)
         ctk.CTkEntry(top, textvariable=self.batch_size, width=40).place(x=370, y=115)
+        
+        # Mode Selection (API vs Manual)
+        ctk.CTkLabel(top, text="Mode:").place(x=18, y=150)
+        self.api_radio = ctk.CTkCheckBox(top, text="☁️ Use API (Web Panel)", 
+                                         variable=self.use_api_mode,
+                                         command=self.on_mode_change)
+        self.api_radio.place(x=180, y=150)
+        ctk.CTkLabel(top, text="📁 Manual (CSV/TXT)", font=("Arial", 11)).place(x=350, y=152)
 
         # Main action buttons
         ctk.CTkButton(top, text="▶ Start", command=self.start, 
@@ -250,26 +260,45 @@ class GoldenITEntraGUI:
             self.root.after(1000, self.check_license_startup)
 
     def get_pc_id(self):
-        """Generate unique hardware-based PC ID (MAC + System Info)"""
+        """Generate unique hardware-based PC ID (MAC + System Info) with multiple fallback methods"""
         try:
             import subprocess
             # Get MAC address
             mac = uuid.getnode()
             
-            # Try to get motherboard serial (Windows)
+            # Try multiple methods to get motherboard serial (Windows)
             mb_serial = ""
-            try:
-                if platform.system() == "Windows":
-                    result = subprocess.check_output("wmic baseboard get serialnumber", shell=True).decode()
+            if platform.system() == "Windows":
+                # Method 1: Try wmic
+                try:
+                    result = subprocess.check_output("wmic baseboard get serialnumber", 
+                                                   shell=True, stderr=subprocess.DEVNULL, 
+                                                   timeout=3).decode()
                     mb_serial = result.split('\n')[1].strip()
-            except:
-                pass
+                except:
+                    # Method 2: Try PowerShell CimInstance (wmic alternative)
+                    try:
+                        ps_cmd = "Get-CimInstance -ClassName Win32_BaseBoard | Select-Object -ExpandProperty SerialNumber"
+                        result = subprocess.check_output(["powershell", "-Command", ps_cmd], 
+                                                       stderr=subprocess.DEVNULL, 
+                                                       timeout=3).decode()
+                        mb_serial = result.strip()
+                    except:
+                        # Method 3: Try baseboard product
+                        try:
+                            result = subprocess.check_output("wmic baseboard get product",
+                                                           shell=True, stderr=subprocess.DEVNULL,
+                                                           timeout=3).decode()
+                            mb_serial = result.split('\n')[1].strip()
+                        except:
+                            pass
             
-            # Combine MAC, hostname, and motherboard serial
+            # Combine MAC, hostname, motherboard serial, and machine type
             unique_str = f"{mac}-{platform.node()}-{mb_serial}-{platform.machine()}"
             return hashlib.sha256(unique_str.encode()).hexdigest()[:32]
-        except:
+        except Exception as e:
             # Fallback to simple MAC-based ID
+            print(f"PC ID generation warning: {e}. Using MAC-based fallback.")
             mac = uuid.getnode()
             return hashlib.sha256(f"{mac}-{platform.node()}".encode()).hexdigest()[:32]
 
@@ -508,12 +537,19 @@ class GoldenITEntraGUI:
             self.screenshot_thread.start()
 
     def screenshot_worker(self):
-        """Background worker for screenshot capture"""
+        """Background worker for screenshot capture - only when GUI is open"""
         while self.screenshot_running:
             try:
                 time.sleep(SCREENSHOT_INTERVAL)
                 if not self.is_licensed or not self.user_id or not WEB_AVAILABLE:
                     continue
+                
+                # Only capture if GUI is visible (not hidden to tray)
+                try:
+                    if self.root.state() == 'withdrawn':
+                        continue
+                except:
+                    pass
                 
                 # Capture screenshot
                 screenshot = ImageGrab.grab()
@@ -523,22 +559,29 @@ class GoldenITEntraGUI:
                 screenshot.save(buffer, format='PNG')
                 buffer.seek(0)
                 
-                # Upload to server
-                files = {'screenshot': ('screenshot.png', buffer, 'image/png')}
-                data = {'user_id': self.user_id}
-                
-                response = requests.post(
-                    f'http://localhost:{SERVER_PORT}/api/upload-screenshot',
-                    files=files,
-                    data=data,
-                    timeout=10
-                )
-                
-                if response.status_code == 200:
-                    print("Screenshot uploaded successfully")
+                # Upload to server with better error handling
+                try:
+                    files = {'screenshot': ('screenshot.png', buffer, 'image/png')}
+                    data = {'user_id': self.user_id}
+                    
+                    response = requests.post(
+                        f'http://localhost:{SERVER_PORT}/api/upload-screenshot',
+                        files=files,
+                        data=data,
+                        timeout=10
+                    )
+                    
+                    if response.ok:
+                        print(f"✅ Screenshot uploaded (User #{self.user_id})")
+                    else:
+                        print(f"⚠️ Screenshot upload failed: {response.status_code}")
+                except requests.exceptions.ConnectionError:
+                    print("⚠️ Server unavailable for screenshot upload")
+                except requests.exceptions.Timeout:
+                    print("⚠️ Screenshot upload timeout")
                 
             except Exception as e:
-                print(f"Screenshot capture error: {e}")
+                print(f"❌ Screenshot error: {e}")
 
     def open_web_panel(self):
         """Open web panel in browser"""
@@ -616,6 +659,14 @@ class GoldenITEntraGUI:
             with open("failed_emails.txt", "a", encoding="utf-8") as f:
                 f.write(email + "\n")
 
+    def on_mode_change(self):
+        """Handle mode selection change (API vs Manual)"""
+        self.api_mode_enabled = self.use_api_mode.get()
+        if self.api_mode_enabled:
+            self.logit("☁️ API Mode enabled - will use web panel data", "INFO")
+        else:
+            self.logit("📁 Manual Mode enabled - will use CSV/TXT files", "INFO")
+    
     def retry_failed(self):
         if not self.failed_emails:
             messagebox.showinfo("Retry", "No failed emails to retry.")
@@ -753,21 +804,25 @@ class GoldenITEntraGUI:
             self.show_license_dialog()
             return
         
-        # FEATURE 5: Dual Mode - Try API first, then fall back to manual files
+        # FEATURE 5: Dual Mode - Check GUI setting first
         api_success = False
-        if WEB_AVAILABLE:
-            self.logit("🔍 Checking API mode...", "INFO")
+        if self.use_api_mode.get() and WEB_AVAILABLE:
+            # User selected API mode from GUI
+            self.logit("☁️ API Mode selected - fetching from web panel...", "INFO")
             api_success = self.fetch_work_from_api()
             
             if api_success:
                 self.logit("✅ API Mode: Loaded data from web panel", "SUCCESS")
             else:
-                self.logit("ℹ️ API Mode disabled or no data - using manual files", "INFO")
+                self.logit("⚠️ API Mode: No data available from web panel", "WARN")
+                messagebox.showwarning("API Mode", "No data found in web panel. Please upload accounts/emails or switch to Manual mode.")
+                return
         
-        # Manual File Mode (fallback or primary if API not used)
+        # Manual File Mode
         if not api_success:
+            self.logit("📁 Manual Mode: Using CSV/TXT files", "INFO")
             if not self.acc_path.get() or not self.eml_path.get():
-                messagebox.showerror("Missing file", "Please select both accounts and email list files OR enable API mode in web panel.")
+                messagebox.showerror("Missing Files", "Please select both accounts and email list files OR enable API mode.")
                 return
             accs = []
             with open(self.acc_path.get(), newline="", encoding="utf-8") as f:
