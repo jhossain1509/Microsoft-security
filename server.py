@@ -360,6 +360,40 @@ def manage_emails():
             db.delete_user_email(email_id, user_id)
         return jsonify({"success": True})
 
+# NEW: Done/Processed Emails Endpoints
+@app.route('/api/user/emails-done', methods=['GET', 'POST', 'DELETE'])
+@login_required
+def manage_emails_done():
+    user_id = session['user_id']
+    
+    if request.method == 'GET':
+        # Get all processed emails
+        done_emails = db.get_done_emails(user_id)
+        return jsonify({"success": True, "emails": done_emails})
+    
+    elif request.method == 'POST':
+        # Move email to done
+        data = request.get_json()
+        email = data.get('email')
+        account_used = data.get('account_used')
+        pc_id = data.get('pc_id')
+        db.move_email_to_done(user_id, email, account_used, pc_id)
+        return jsonify({"success": True})
+    
+    elif request.method == 'DELETE':
+        action = request.args.get('action')
+        if action == 'clean':
+            # Clean all done emails
+            count = db.clean_done_emails(user_id)
+            return jsonify({"success": True, "deleted": count})
+        else:
+            # Delete single done email
+            email_id = request.args.get('id', type=int)
+            if email_id:
+                db.delete_done_email(email_id)
+                return jsonify({"success": True})
+            return jsonify({"error": "Email ID required"}), 400
+
 @app.route('/api/user/settings', methods=['GET', 'POST'])
 @login_required
 def manage_settings():

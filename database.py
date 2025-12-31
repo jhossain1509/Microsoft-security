@@ -136,6 +136,19 @@ class Database:
             )
         ''')
         
+        # NEW: Processed/Done Emails table
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS user_emails_done (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                email TEXT NOT NULL,
+                processed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                account_used TEXT,
+                pc_id TEXT,
+                FOREIGN KEY (user_id) REFERENCES users (id)
+            )
+        ''')
+        
         # FEATURE 2: User Settings
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS user_settings (
@@ -618,6 +631,61 @@ class Database:
         conn.commit()
         conn.close()
         return True
+    
+    # ===== Done/Processed Emails Operations (NEW) =====
+    
+    def move_email_to_done(self, user_id: int, email: str, account_used: str = None, pc_id: str = None):
+        """Move email from user_emails to user_emails_done"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        # Add to done table
+        cursor.execute(
+            """INSERT INTO user_emails_done (user_id, email, account_used, pc_id)
+               VALUES (?, ?, ?, ?)""",
+            (user_id, email, account_used, pc_id)
+        )
+        
+        # Remove from pending table
+        cursor.execute(
+            "DELETE FROM user_emails WHERE user_id=? AND email=?",
+            (user_id, email)
+        )
+        
+        conn.commit()
+        conn.close()
+    
+    def get_done_emails(self, user_id: int) -> List[Dict]:
+        """Get all processed/done emails for a user"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """SELECT * FROM user_emails_done 
+               WHERE user_id=? 
+               ORDER BY processed_at DESC""",
+            (user_id,)
+        )
+        emails = [dict(row) for row in cursor.fetchall()]
+        conn.close()
+        return emails
+    
+    def delete_done_email(self, email_id: int):
+        """Delete a done email"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM user_emails_done WHERE id=?", (email_id,))
+        conn.commit()
+        conn.close()
+    
+    def clean_done_emails(self, user_id: int):
+        """Clean/delete all done emails for a user"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM user_emails_done WHERE user_id=?", (user_id,))
+        rows_deleted = cursor.rowcount
+        conn.commit()
+        conn.close()
+        return rows_deleted
     
     def get_user_settings(self, user_id: int) -> Dict:
         """Get user settings"""
