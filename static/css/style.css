@@ -511,6 +511,89 @@ body {
     font-size: 12px;
 }
 
+/* Screenshot Gallery */
+.screenshot-gallery {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 20px;
+    padding: 20px 0;
+}
+
+.screenshot-card {
+    background: var(--darker-bg);
+    border-radius: 8px;
+    overflow: hidden;
+    border: 2px solid var(--border-color);
+    transition: transform 0.2s;
+}
+
+.screenshot-card:hover {
+    transform: translateY(-5px);
+    border-color: var(--primary-color);
+}
+
+.screenshot-thumb {
+    width: 100%;
+    height: 200px;
+    object-fit: cover;
+    display: block;
+}
+
+.screenshot-info {
+    padding: 15px;
+}
+
+.screenshot-info p {
+    margin: 5px 0;
+    font-size: 13px;
+}
+
+.screenshot-actions {
+    padding: 0 15px 15px;
+    display: flex;
+    gap: 10px;
+}
+
+.btn-sm {
+    padding: 5px 10px;
+    font-size: 12px;
+}
+
+/* Modal */
+.modal {
+    display: none;
+    position: fixed;
+    z-index: 1000;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.9);
+    align-items: center;
+    justify-content: center;
+}
+
+.modal-content {
+    position: relative;
+    background: var(--darker-bg);
+    padding: 20px;
+    border-radius: 8px;
+}
+
+.close {
+    position: absolute;
+    top: 10px;
+    right: 20px;
+    color: #fff;
+    font-size: 35px;
+    font-weight: bold;
+    cursor: pointer;
+}
+
+.close:hover {
+    color: var(--danger-color);
+}
+
 /* Upload Sections */
 .upload-section {
     background: var(--darker-bg);

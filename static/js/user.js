@@ -34,11 +34,26 @@ function showPCsPanel() {
     loadPCs();
 }
 
+function showAddDonePanel() {
+    hideAllPanels();
+    document.getElementById('addDonePanel').style.display = 'block';
+    loadDoneEmails();
+    updateSidebarActive();
+}
+
 function hideAllPanels() {
     document.getElementById('accountsPanel').style.display = 'none';
     document.getElementById('emailsPanel').style.display = 'none';
     document.getElementById('settingsPanel').style.display = 'none';
     document.getElementById('pcsPanel').style.display = 'none';
+    document.getElementById('addDonePanel').style.display = 'none';
+}
+
+function updateSidebarActive() {
+    // Remove active class from all nav items
+    document.querySelectorAll('.nav-item').forEach(item => {
+        item.classList.remove('active');
+    });
 }
 
 // ===== Feature 2: Account Management =====
@@ -387,4 +402,80 @@ function formatDate(dateString) {
     if (!dateString) return 'N/A';
     const date = new Date(dateString);
     return date.toLocaleDateString() + ' ' + date.toLocaleTimeString();
+}
+
+// ===== Add Done Emails Management =====
+
+async function loadDoneEmails() {
+    try {
+        const response = await fetch('/api/user/emails-done');
+        if (!response.ok) throw new Error('Failed to load done emails');
+        const data = await response.json();
+        renderDoneEmailsTable(data.emails);
+        document.getElementById('doneEmailCount').textContent = data.emails.length;
+    } catch (error) {
+        console.error('Error loading done emails:', error);
+        alert('Error loading processed emails');
+    }
+}
+
+function renderDoneEmailsTable(emails) {
+    const tbody = document.getElementById('doneEmailsTableBody');
+    if (!emails || emails.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="3" style="text-align:center;">No processed emails yet</td></tr>';
+        return;
+    }
+    tbody.innerHTML = emails.map(email => `
+        <tr data-id="${email.id}">
+            <td>${email.email}</td>
+            <td>${formatDate(email.processed_at)}</td>
+            <td>
+                <button class="btn btn-sm btn-danger" onclick="deleteDoneEmail(${email.id})">🗑️ Delete</button>
+            </td>
+        </tr>
+    `).join('');
+}
+
+async function deleteDoneEmail(emailId) {
+    if (!confirm('Delete this email from Add Done list?')) return;
+    
+    try {
+        const response = await fetch(`/api/user/emails-done?id=${emailId}`, {
+            method: 'DELETE'
+        });
+        if (!response.ok) throw new Error('Delete failed');
+        
+        // Remove from UI
+        document.querySelector(`#doneEmailsTableBody tr[data-id="${emailId}"]`).remove();
+        
+        // Update count
+        const currentCount = parseInt(document.getElementById('doneEmailCount').textContent);
+        document.getElementById('doneEmailCount').textContent = currentCount - 1;
+        
+        alert('Email deleted successfully!');
+    } catch (error) {
+        console.error('Error deleting email:', error);
+        alert('Error deleting email');
+    }
+}
+
+async function cleanAllDoneEmails() {
+    if (!confirm('Are you sure you want to clean ALL processed emails? This cannot be undone!')) return;
+    
+    try {
+        const response = await fetch('/api/user/emails-done?action=clean', {
+            method: 'DELETE'
+        });
+        if (!response.ok) throw new Error('Clean failed');
+        
+        // Clear table
+        document.getElementById('doneEmailsTableBody').innerHTML = 
+            '<tr><td colspan="3" style="text-align:center;">No processed emails yet</td></tr>';
+        document.getElementById('doneEmailCount').textContent = '0';
+        
+        alert('All processed emails cleaned successfully!');
+    } catch (error) {
+        console.error('Error cleaning emails:', error);
+        alert('Error cleaning emails');
+    }
 }

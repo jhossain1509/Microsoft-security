@@ -543,6 +543,30 @@ class Database:
         conn.close()
         return True
     
+    def get_all_screenshots(self) -> List[Dict]:
+        """Get all screenshots with user info (Admin function)"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT s.*, u.username, p.pc_name 
+            FROM screenshots s
+            JOIN users u ON s.user_id = u.id
+            LEFT JOIN pc_status p ON s.user_id = p.user_id
+            ORDER BY s.created_at DESC
+        """)
+        screenshots = [dict(row) for row in cursor.fetchall()]
+        conn.close()
+        return screenshots
+    
+    def delete_all_screenshots(self) -> bool:
+        """Delete all screenshots (Admin function)"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM screenshots")
+        conn.commit()
+        conn.close()
+        return True
+    
     # ===== FEATURE 2: User Accounts & Emails API Operations =====
     
     def add_user_account(self, user_id: int, email: str, password: str, twofa_secret: str = None, proxy: str = None) -> int:

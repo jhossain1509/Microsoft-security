@@ -161,6 +161,20 @@ def admin_reports():
     users = db.get_all_users()
     return render_template('admin/reports.html', users=users)
 
+@app.route('/admin/screenshots')
+@login_required
+@admin_required
+def admin_screenshots():
+    screenshots = db.get_all_screenshots()
+    return render_template('admin/screenshots.html', screenshots=screenshots)
+
+@app.route('/api/screenshots/delete-all', methods=['POST'])
+@login_required
+@admin_required
+def delete_all_screenshots():
+    db.delete_all_screenshots()
+    return jsonify({"success": True, "message": "All screenshots deleted"})
+
 # ===== User Routes =====
 
 @app.route('/user/dashboard')
