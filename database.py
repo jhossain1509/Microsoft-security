@@ -598,18 +598,47 @@ class Database:
         conn.close()
         return account_id
     
-    def get_user_accounts(self, user_id: int, active_only: bool = True) -> List[Dict]:
-        """Get user's accounts from pool"""
+    def get_user_accounts(self, user_id: int, active_only: bool = True, pc_id: str = None, cooldown_minutes: int = 10) -> List[Dict]:
+        """Get user's accounts from pool with optional PC-based cooldown filtering"""
         conn = self.get_connection()
         cursor = conn.cursor()
-        query = "SELECT * FROM user_accounts WHERE user_id=?"
-        if active_only:
-            query += " AND is_active=1"
-        query += " ORDER BY id"
-        cursor.execute(query, (user_id,))
+        
+        if pc_id and cooldown_minutes:
+            # Smart distribution: Get accounts available for this PC
+            query = """
+                SELECT * FROM user_accounts 
+                WHERE user_id=? 
+                AND (is_active=1 OR NOT ?)
+                AND (
+                    last_used IS NULL 
+                    OR datetime('now', 'localtime') >= datetime(last_used, '+' || ? || ' minutes')
+                )
+                ORDER BY last_used ASC NULLS FIRST, id
+            """
+            cursor.execute(query, (user_id, active_only, cooldown_minutes))
+        else:
+            # Normal: Get all accounts
+            query = "SELECT * FROM user_accounts WHERE user_id=?"
+            if active_only:
+                query += " AND is_active=1"
+            query += " ORDER BY id"
+            cursor.execute(query, (user_id,))
+        
         accounts = [dict(row) for row in cursor.fetchall()]
         conn.close()
         return accounts
+    
+    def update_account_last_used(self, account_id: int, pc_id: str = None):
+        """Update account's last_used timestamp after use"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            UPDATE user_accounts 
+            SET last_used = datetime('now', 'localtime')
+            WHERE id = ?
+        """, (account_id,))
+        conn.commit()
+        conn.close()
     
     def delete_user_account_old(self, account_id: int) -> bool:
         """Delete account from user's pool (deprecated - use delete_user_account)"""

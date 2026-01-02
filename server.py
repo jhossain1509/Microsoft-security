@@ -537,7 +537,7 @@ def manage_settings():
 @app.route('/api/desktop/get-work', methods=['POST'])
 @csrf.exempt  # Desktop app endpoint - no CSRF needed
 def get_desktop_work():
-    """API endpoint for desktop app to fetch accounts and emails"""
+    """API endpoint for desktop app to fetch accounts and emails with smart distribution"""
     data = request.get_json()
     user_id = data.get('user_id')
     pc_id = data.get('pc_id')
@@ -551,16 +551,32 @@ def get_desktop_work():
     if not settings.get('api_mode_enabled'):
         return jsonify({"api_mode": False})
     
-    # Get accounts and emails
-    accounts = db.get_user_accounts(user_id)
+    # Smart account distribution with cooldown (Feature: 10-minute per account)
+    cooldown_minutes = settings.get('interval_minutes', 10)
+    accounts = db.get_user_accounts(user_id, active_only=True, pc_id=pc_id, cooldown_minutes=cooldown_minutes)
     emails = db.get_user_emails(user_id, status='pending')
     
     return jsonify({
         "api_mode": True,
         "accounts": accounts,
         "emails": emails,
-        "settings": settings
+        "settings": settings,
+        "cooldown_minutes": cooldown_minutes
     })
+
+@app.route('/api/user/accounts/update-usage', methods=['POST'])
+@csrf.exempt  # Desktop app endpoint
+def update_account_usage_endpoint():
+    """Update account's last_used timestamp after successful use"""
+    data = request.get_json()
+    account_id = data.get('account_id')
+    pc_id = data.get('pc_id')
+    
+    if not account_id:
+        return jsonify({"error": "account_id required"}), 400
+    
+    db.update_account_last_used(account_id, pc_id)
+    return jsonify({"success": True})
 
 # ===== Feature 4: Auto Pause/Resume =====
 

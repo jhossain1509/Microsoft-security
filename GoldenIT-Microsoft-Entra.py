@@ -107,6 +107,7 @@ class Account:
     status: str = ""
     detail: str = ""
     attempts: int = 0
+    account_id: int = None  # For tracking API accounts with cooldown
 
 class GoldenITEntraGUI:
     def __init__(self):
@@ -303,15 +304,25 @@ class GoldenITEntraGUI:
             return hashlib.sha256(f"{mac}-{platform.node()}".encode()).hexdigest()[:32]
 
     def check_license_startup(self):
-        """Check for saved license on startup"""
+        """Check for saved license on startup with retry logic"""
+        # Wait a bit for server to be ready
+        time.sleep(2)
+        
         if os.path.exists('license.key'):
             try:
                 with open('license.key', 'r') as f:
                     saved_license = f.read().strip()
                 if saved_license:
-                    self.validate_license(saved_license)
-            except:
-                pass
+                    # Try validation with retries
+                    for attempt in range(3):
+                        if self.validate_license(saved_license):
+                            self.logit(f"✅ License loaded from file", "SUCCESS")
+                            return
+                        time.sleep(1)
+                    # Failed after retries
+                    self.logit("⚠️ Saved license validation failed", "WARN")
+            except Exception as e:
+                print(f"Failed to load license: {e}")
 
     def validate_license(self, license_key):
         """Validate license with server - MANDATORY"""
@@ -406,6 +417,39 @@ class GoldenITEntraGUI:
             )
         except Exception as e:
             print(f"Failed to log activity to server: {e}")
+    
+    def move_email_to_done(self, email, account_used):
+        """Move successfully processed email to 'Add Done' list"""
+        if not WEB_AVAILABLE or not self.user_id:
+            return
+        try:
+            response = requests.post(
+                f'http://localhost:{SERVER_PORT}/api/user/emails-done',
+                json={
+                    'user_id': self.user_id,
+                    'email': email,
+                    'account_used': account_used,
+                    'pc_id': self.pc_id
+                },
+                timeout=5
+            )
+            if response.ok:
+                print(f"✅ Email moved to done: {email}")
+        except Exception as e:
+            print(f"Failed to move email to done: {e}")
+    
+    def update_account_usage(self, account_id):
+        """Update account last_used timestamp after successful use"""
+        if not WEB_AVAILABLE:
+            return
+        try:
+            requests.post(
+                f'http://localhost:{SERVER_PORT}/api/user/accounts/update-usage',
+                json={'account_id': account_id},
+                timeout=5
+            )
+        except Exception as e:
+            print(f"Failed to update account usage: {e}")
 
     # ===== FEATURE 4: Auto Pause/Resume with Heartbeat =====
     
@@ -508,7 +552,8 @@ class GoldenITEntraGUI:
                     self.accounts.append(Account(
                         email=acc_data.get('email', ''),
                         password=acc_data.get('password', ''),
-                        secret=acc_data.get('twofa_secret', '')
+                        secret=acc_data.get('twofa_secret', ''),
+                        account_id=acc_data.get('id')  # Store account ID for cooldown tracking
                     ))
                 self.original_accounts = self.accounts.copy()
             
@@ -1033,9 +1078,16 @@ class GoldenITEntraGUI:
                         save_sent_done(email)
                         remove_email_from_txt(email, self.eml_path.get())
                         
-                        # Log to server if available
+                        # Log to server if available (activity log)
                         if WEB_AVAILABLE:
                             self.log_activity_to_server(acc.email, email, "success")
+                            
+                            # NEW: Move email to "Add Done" list
+                            self.move_email_to_done(email, acc.email)
+                            
+                            # Update account last_used timestamp
+                            if self.api_mode_enabled and hasattr(acc, 'account_id'):
+                                self.update_account_usage(acc.account_id)
                         
                     except Exception as e:
                         # Put email back to list
